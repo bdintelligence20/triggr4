@@ -1,9 +1,26 @@
-bind = "0.0.0.0:10000"
-workers = 2  # Reduce number of workers
+# gunicorn_config.py
+bind = "0.0.0.0:8000"
+workers = 2
 threads = 2
-worker_class = "sync"  # Use sync workers instead of async
-worker_connections = 10
-timeout = 120  # Increase timeout for large files
-max_requests = 200
-max_requests_jitter = 50
-preload_app = False  # Don't preload to save memory
+worker_class = 'gthread'
+worker_connections = 1000
+timeout = 120
+keepalive = 2
+max_requests = 100
+max_requests_jitter = 10
+worker_tmp_dir = '/dev/shm'
+accesslog = '-'
+errorlog = '-'
+loglevel = 'info'
+capture_output = True
+enable_stdio_inheritance = True
+
+# Memory optimization
+max_requests = 100  # Restart workers after this many requests
+max_requests_jitter = 10  # Add randomness to the restart interval
+worker_tmp_dir = '/dev/shm'  # Use RAM for temporary files
+
+# Function to clean up worker processes
+def worker_exit(server, worker):
+    import gc
+    gc.collect()
