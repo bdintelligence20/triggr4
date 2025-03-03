@@ -115,11 +115,11 @@ import docx2txt
 # Flask App Configuration
 # -------------------------------
 app = Flask(__name__)
-# Make sure this is correct in your app.py
-CORS(app, origins=["https://triggr4.onrender.com"], supports_credentials=True)
+CORS(app, origins=["*"], supports_credentials=True, methods=["GET", "POST", "OPTIONS", "DELETE", "PUT"])
 
 @app.after_request
-def after_request(response):
+def add_cors_headers(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
