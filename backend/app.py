@@ -1,6 +1,7 @@
 import os
 import uuid
 import json
+import base64
 from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
@@ -25,19 +26,19 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 # OpenAI API Key for Embeddings
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-# Firebase and Google Cloud Storage credentials (as full JSON strings)
-FIREBASE_CRED_JSON = os.environ.get("FIREBASE_CRED_JSON")
-GCS_CRED_JSON = os.environ.get("GCS_CRED_JSON")
+# Firebase and Google Cloud Storage credentials as base64 encoded strings
+firebase_cred_b64 = os.environ.get("FIREBASE_CRED_B64")
+gcs_cred_b64 = os.environ.get("GCS_CRED_B64")
 GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME")  # e.g., "knowledge-hub-files"
 
 if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_FROM and
         PINECONE_API_KEY and PINECONE_ENVIRONMENT and PINECONE_INDEX_NAME and
-        ANTHROPIC_API_KEY and OPENAI_API_KEY and FIREBASE_CRED_JSON and GCS_CRED_JSON and GCS_BUCKET_NAME):
+        ANTHROPIC_API_KEY and OPENAI_API_KEY and firebase_cred_b64 and gcs_cred_b64 and GCS_BUCKET_NAME):
     raise Exception("One or more required environment variables are missing.")
 
-# Replace escaped newlines with actual newlines if needed.
-FIREBASE_CRED_JSON = FIREBASE_CRED_JSON.replace('\\n', '\n')
-GCS_CRED_JSON = GCS_CRED_JSON.replace('\\n', '\n')
+# Decode the base64 credentials to get valid JSON strings
+firebase_cred_json_str = base64.b64decode(firebase_cred_b64).decode("utf-8")
+gcs_cred_json_str = base64.b64decode(gcs_cred_b64).decode("utf-8")
 
 # -------------------------------
 # Initialize External Services
@@ -46,7 +47,7 @@ GCS_CRED_JSON = GCS_CRED_JSON.replace('\\n', '\n')
 # Firebase Admin
 import firebase_admin
 from firebase_admin import credentials, firestore
-firebase_cred_info = json.loads(FIREBASE_CRED_JSON)
+firebase_cred_info = json.loads(firebase_cred_json_str)
 firebase_admin.initialize_app(credentials.Certificate(firebase_cred_info))
 db = firestore.client()
 
@@ -61,7 +62,7 @@ twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 # Google Cloud Storage
 from google.cloud import storage
-gcs_client = storage.Client.from_service_account_info(json.loads(GCS_CRED_JSON))
+gcs_client = storage.Client.from_service_account_info(json.loads(gcs_cred_json_str))
 bucket = gcs_client.bucket(GCS_BUCKET_NAME)
 
 # OpenAI
@@ -113,8 +114,7 @@ def get_embeddings(chunks: list) -> list:
 
 def call_claude_rag(context: str, question: str) -> str:
     """
-    Improved RAG: Uses Anthropic's Claude 3.5 Sonnet model with an in-depth prompt.
-    The context and question are injected into the prompt template.
+    Improved RAG using Anthropic's Claude 3.5 Sonnet with an in-depth prompt.
     """
     template = (
         "You are a helpful AI assistant tasked with answering questions based on provided context. "
@@ -140,7 +140,6 @@ def call_claude_rag(context: str, question: str) -> str:
         "- If the question asks for an opinion or judgment that isn't explicitly stated in the context, clarify that you can't provide personal opinions and instead offer relevant factual information from the context.\n\n"
         "Please proceed with answering the question based on these instructions."
     )
-    # Replace the placeholders with actual context and question.
     prompt_text = template.replace("{{CONTEXT}}", context).replace("{{QUESTION}}", question)
     response = anthropic_client.messages.create(
         model="claude-3-5-sonnet-20241022",
@@ -180,7 +179,6 @@ def upload_document():
     local_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(local_path)
 
-    # Extract text based on file type
     if filename.lower().endswith('.pdf'):
         file_type = 'pdf'
         try:
@@ -196,13 +194,11 @@ def upload_document():
     else:
         return jsonify({"error": "Unsupported file type"}), 400
 
-    # Upload file to Google Cloud Storage
     gcs_filename = f"documents/{uuid.uuid4()}_{filename}"
     blob = bucket.blob(gcs_filename)
     blob.upload_from_filename(local_path)
     file_url = blob.public_url
 
-    # Save metadata and content to Firebase Firestore
     doc_data = {
         "title": title,
         "content": content,
@@ -215,7 +211,6 @@ def upload_document():
     doc_ref.set(doc_data)
     item_id = doc_ref.id
 
-    # Partition content and compute embeddings
     chunks = chunk_text(content, chunk_size=500)
     if chunks:
         try:
@@ -254,19 +249,16 @@ def query():
     if not query_text:
         return jsonify({"error": "No query provided"}), 400
 
-    # Retrieve query embedding
     try:
         response = openai.Embedding.create(input=[query_text], model="text-embedding-ada-002")
         query_embedding = response['data'][0]['embedding']
     except Exception as e:
         return jsonify({"error": "Failed to get query embedding", "details": str(e)}), 500
 
-    # Query Pinecone for matching chunks, filtering by category if provided.
     filter_query = {"category": category} if category else None
     query_response = index.query(vector=query_embedding, top_k=5, filter=filter_query)
     retrieved_chunks = query_response.get('matches', [])
 
-    # Assemble context from retrieved chunks.
     context_lines = []
     for match in retrieved_chunks:
         meta = match.get('metadata', {})
@@ -275,7 +267,6 @@ def query():
         context_lines.append(f"{title} (chunk {chunk_index})")
     context = "\n".join(context_lines)
 
-    # Use the improved RAG function.
     try:
         ai_response = call_claude_rag(context, query_text)
     except Exception as e:
@@ -315,7 +306,6 @@ def whatsapp_webhook():
             ai_response = "Error generating AI response."
             print("Claude API error:", e)
 
-    # Log the conversation to Firebase Firestore
     conversation_data = {
         "from": from_number,
         "message": incoming_msg,
