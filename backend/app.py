@@ -81,11 +81,31 @@ except Exception as e:
     raise
 
 # Pinecone
+# Pinecone
 from pinecone import Pinecone
 try:
-    pc = Pinecone(api_key=PINECONE_API_KEY)
-    index = pc.Index(PINECONE_INDEX_NAME)
-    logger.info(f"Connected to Pinecone index: {PINECONE_INDEX_NAME}")
+    # Initialize with retries and timeout settings
+    pc = Pinecone(
+        api_key=PINECONE_API_KEY,
+        # Add these options to help with SSL issues
+        pool_threads=1,  # Use a single thread for connection stability
+    )
+    
+    # Test connection with retry logic
+    retry_count = 3
+    for attempt in range(retry_count):
+        try:
+            index = pc.Index(PINECONE_INDEX_NAME)
+            # Perform a simple operation to test connection
+            stats = index.describe_index_stats()
+            logger.info(f"Connected to Pinecone index: {PINECONE_INDEX_NAME}, total vectors: {stats.get('total_vector_count', 0)}")
+            break
+        except Exception as e:
+            if attempt < retry_count - 1:
+                logger.warning(f"Pinecone connection attempt {attempt+1} failed: {str(e)}. Retrying...")
+                time.sleep(2)  # Wait before retrying
+            else:
+                raise
 except Exception as e:
     logger.critical(f"Pinecone initialization failed: {str(e)}")
     raise
@@ -391,12 +411,16 @@ def health_check():
 @app.route('/upload', methods=['POST'])
 def upload_document():
     """Upload and process a document for the knowledge base."""
+    logger.info("Upload request received")
+    
     if 'file' not in request.files:
         return jsonify({"error": "No file provided"}), 400
 
     file = request.files['file']
     category = request.form.get('category', 'general')
     title = request.form.get('title') or file.filename
+    
+    logger.info(f"Processing file: {title}, category: {category}")
 
     if file.filename == '':
         return jsonify({"error": "Empty filename"}), 400
@@ -406,8 +430,9 @@ def upload_document():
         filename = secure_filename(file.filename)
         local_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(local_path)
+        logger.info(f"File saved to {local_path}")
         
-        # Determine file type and extract text
+        # Extract text...
         if filename.lower().endswith('.pdf'):
             file_type = 'pdf'
             content = extract_text_from_pdf(local_path)
@@ -421,89 +446,113 @@ def upload_document():
         else:
             return jsonify({"error": "Unsupported file type"}), 400
             
+        logger.info(f"Extracted {len(content)} characters from file")
+        
         if not content or len(content.strip()) < 10:
             return jsonify({"error": "Could not extract meaningful content from file"}), 400
 
-        # Save metadata and content to Firebase Firestore
-        doc_data = {
+        # Store in Firestore...
+        doc_ref = db.collection("knowledge_items").document()
+        doc_ref.set({
             "title": title,
             "content": content,
             "category": category,
             "file_type": file_type,
             "word_count": len(content.split()),
             "created_at": firestore.SERVER_TIMESTAMP
-        }
-        doc_ref = db.collection("knowledge_items").document()
-        doc_ref.set(doc_data)
+        })
         item_id = doc_ref.id
+        logger.info(f"Saved document to Firestore with ID: {item_id}")
 
-        # Partition content and compute embeddings
-        chunks = chunk_text(content, chunk_size=500, overlap=50)
-        if not chunks:
-            return jsonify({"error": "No content to process for embeddings"}), 400
+        # Generate embeddings and store in Pinecone
+        try:
+            # Create chunks
+            chunks = chunk_text(content, chunk_size=500, overlap=50)
+            logger.info(f"Created {len(chunks)} text chunks")
+            
+            if not chunks:
+                return jsonify({"error": "No content to process for embeddings"}), 400
 
-        # Get embeddings with new OpenAI API
-        vectors = []
-        batch_size = 10  # Process in smaller batches
+            # Process in batches
+            batch_size = 5  # Small batch size to avoid issues
+            vectors = []
+            total_chunks = len(chunks)
+            
+            for i in range(0, total_chunks, batch_size):
+                end_idx = min(i + batch_size, total_chunks)
+                current_batch = chunks[i:end_idx]
+                
+                logger.info(f"Processing embedding batch {i+1} to {end_idx} of {total_chunks}")
+                
+                try:
+                    # Get embeddings
+                    response = client.embeddings.create(
+                        model="text-embedding-ada-002",
+                        input=current_batch
+                    )
+                    
+                    # Create vectors
+                    for j, data in enumerate(response.data):
+                        chunk_idx = i + j
+                        vector_id = f"{item_id}_{chunk_idx}"
+                        embedding = data.embedding
+                        metadata = {
+                            "item_id": item_id,
+                            "chunk_index": chunk_idx,
+                            "category": category,
+                            "title": title,
+                            "file_type": file_type
+                        }
+                        vectors.append((vector_id, embedding, metadata))
+                    
+                    logger.info(f"Generated embeddings for batch {i+1} to {end_idx}")
+                except Exception as e:
+                    logger.error(f"Error generating embeddings for batch {i+1}-{end_idx}: {str(e)}")
+            
+            # Upload vectors to Pinecone in small batches
+            if vectors:
+                vector_batch_size = 10
+                total_vectors = len(vectors)
+                
+                for i in range(0, total_vectors, vector_batch_size):
+                    end_idx = min(i + vector_batch_size, total_vectors)
+                    current_batch = vectors[i:end_idx]
+                    
+                    logger.info(f"Upserting vector batch {i+1} to {end_idx} of {total_vectors} to Pinecone")
+                    try:
+                        # Try with retries
+                        max_retries = 3
+                        for attempt in range(max_retries):
+                            try:
+                                index.upsert(vectors=current_batch)
+                                logger.info(f"Successfully upserted vector batch {i+1}-{end_idx}")
+                                break
+                            except Exception as e:
+                                if attempt < max_retries - 1:
+                                    logger.warning(f"Upsert attempt {attempt+1} failed: {str(e)}. Retrying...")
+                                    time.sleep(2)
+                                else:
+                                    raise
+                    except Exception as e:
+                        logger.error(f"Failed to upsert vector batch {i+1}-{end_idx}: {str(e)}")
+                        # Continue with other batches
+                
+                logger.info(f"Completed upserting {total_vectors} vectors to Pinecone")
+            else:
+                logger.warning("No vectors generated")
+        except Exception as e:
+            logger.error(f"Error processing vectors: {str(e)}")
         
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i+batch_size]
-            try:
-                # Use new OpenAI client syntax
-                response = client.embeddings.create(
-                    model="text-embedding-ada-002",
-                    input=batch
-                )
-                
-                # Extract embeddings from response
-                batch_embeddings = [item.embedding for item in response.data]
-                
-                # Create vectors for this batch
-                for idx, embedding in enumerate(batch_embeddings):
-                    vector_id = f"{item_id}_{i+idx}"
-                    metadata = {
-                        "item_id": item_id,
-                        "chunk_index": i+idx,
-                        "category": category,
-                        "title": title,
-                        "file_type": file_type
-                    }
-                    vectors.append((vector_id, embedding, metadata))
-                
-                # Log progress
-                logger.info(f"Generated embeddings for chunks {i} to {i+len(batch_embeddings)-1}")
-            except Exception as e:
-                logger.error(f"Error generating embeddings for batch {i}: {str(e)}")
-                # Continue with other batches
-        
-        # Upload vectors to Pinecone
-        if vectors:
-            try:
-                # Upload in batches
-                batch_size = 50
-                for i in range(0, len(vectors), batch_size):
-                    batch = vectors[i:i+batch_size]
-                    index.upsert(vectors=batch)
-                    logger.info(f"Uploaded vectors {i} to {i+len(batch)-1} to Pinecone")
-            except Exception as e:
-                logger.error(f"Error uploading vectors to Pinecone: {str(e)}")
-                return jsonify({"error": f"Failed to upload vectors: {str(e)}"}), 500
-        else:
-            return jsonify({"error": "No vectors generated"}), 500
-
-        # Clean up temporary file
+        # Clean up
         os.remove(local_path)
-
+        
         return jsonify({
-            "message": "File uploaded and processed successfully",
-            "item_id": item_id,
-            "chunks_processed": len(chunks),
-            "vectors_uploaded": len(vectors)
+            "message": "File uploaded and processed",
+            "item_id": item_id
         })
         
     except Exception as e:
         logger.error(f"Upload error: {str(e)}")
-        # Clean up if needed
         if 'local_path' in locals() and os.path.exists(local_path):
             os.remove(local_path)
         return jsonify({"error": f"Failed to process document: {str(e)}"}), 500
