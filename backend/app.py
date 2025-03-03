@@ -10,33 +10,33 @@ from flask_cors import CORS
 # Load External Service Credentials from Environment Variables
 # -------------------------------
 
-# Twilio
+# Twilio Credentials
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM")
 
-# Pinecone
+# Pinecone Credentials and Index Name
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
-PINECONE_ENVIRONMENT = os.environ.get("PINECONE_ENVIRONMENT")
 PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME")
 
-# Anthropic (Claude 3.5 Sonnet)
+# Anthropic (Claude 3.5 Sonnet) API Key
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
 # OpenAI API Key for Embeddings
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-# Firebase and Google Cloud Storage credentials as base64 encoded strings
+# Firebase and GCS Credentials (Base64-encoded strings)
 firebase_cred_b64 = os.environ.get("FIREBASE_CRED_B64")
 gcs_cred_b64 = os.environ.get("GCS_CRED_B64")
-GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME")  # e.g., "knowledge-hub-files"
+GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME")  # should be "knowledge-hub-files"
 
 if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_FROM and
-        PINECONE_API_KEY and PINECONE_ENVIRONMENT and PINECONE_INDEX_NAME and
-        ANTHROPIC_API_KEY and OPENAI_API_KEY and firebase_cred_b64 and gcs_cred_b64 and GCS_BUCKET_NAME):
+        PINECONE_API_KEY and PINECONE_INDEX_NAME and
+        ANTHROPIC_API_KEY and OPENAI_API_KEY and
+        firebase_cred_b64 and gcs_cred_b64 and GCS_BUCKET_NAME):
     raise Exception("One or more required environment variables are missing.")
 
-# Decode the base64 credentials to get valid JSON strings
+# Decode the Base64 encoded credentials into proper JSON strings
 firebase_cred_json_str = base64.b64decode(firebase_cred_b64).decode("utf-8")
 gcs_cred_json_str = base64.b64decode(gcs_cred_b64).decode("utf-8")
 
@@ -51,12 +51,15 @@ firebase_cred_info = json.loads(firebase_cred_json_str)
 firebase_admin.initialize_app(credentials.Certificate(firebase_cred_info))
 db = firestore.client()
 
-# Pinecone
-import pinecone
-pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENVIRONMENT)
-index = pinecone.Index(PINECONE_INDEX_NAME)
+# Updated Pinecone Initialization using the new SDK
+from pinecone import Pinecone
+pc = Pinecone(
+    api_key=PINECONE_API_KEY,
+    host="https://knowledge-hub-vectors-d6aehd0.svc.gcp-us-central1-4a9f.pinecone.io"
+)
+index = pc.Index(PINECONE_INDEX_NAME)
 
-# Twilio
+# Twilio Client
 from twilio.rest import Client
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
@@ -114,7 +117,8 @@ def get_embeddings(chunks: list) -> list:
 
 def call_claude_rag(context: str, question: str) -> str:
     """
-    Improved RAG using Anthropic's Claude 3.5 Sonnet with an in-depth prompt.
+    Improved RAG: Constructs a detailed prompt using the provided context and question,
+    and calls Anthropic's Claude 3.5 Sonnet model.
     """
     template = (
         "You are a helpful AI assistant tasked with answering questions based on provided context. "
@@ -179,6 +183,7 @@ def upload_document():
     local_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(local_path)
 
+    # Extract text based on file type
     if filename.lower().endswith('.pdf'):
         file_type = 'pdf'
         try:
@@ -194,11 +199,13 @@ def upload_document():
     else:
         return jsonify({"error": "Unsupported file type"}), 400
 
+    # Upload file to Google Cloud Storage
     gcs_filename = f"documents/{uuid.uuid4()}_{filename}"
     blob = bucket.blob(gcs_filename)
     blob.upload_from_filename(local_path)
     file_url = blob.public_url
 
+    # Save metadata and content to Firebase Firestore
     doc_data = {
         "title": title,
         "content": content,
@@ -211,6 +218,7 @@ def upload_document():
     doc_ref.set(doc_data)
     item_id = doc_ref.id
 
+    # Partition content and compute embeddings
     chunks = chunk_text(content, chunk_size=500)
     if chunks:
         try:
