@@ -100,8 +100,8 @@ gcs_client = storage.Client.from_service_account_info(gcs_cred_info)
 bucket = gcs_client.bucket(GCS_BUCKET_NAME)
 
 # OpenAI
-import openai
-openai.api_key = OPENAI_API_KEY
+from openai import OpenAI
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Anthropic
 import anthropic
