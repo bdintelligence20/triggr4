@@ -10,7 +10,7 @@ asyncio
 
 # External Services
 firebase-admin
-pinecone-client
+pinecone
 twilio
 google-cloud-storage
 openai
