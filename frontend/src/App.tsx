@@ -1,20 +1,23 @@
 import { useState, useRef, useEffect } from 'react';
-import { Book, MessageSquare, Send, Upload, Plus, Trash2, FileText, File as FilePdf, FileIcon, Smartphone, Navigation, Search, X, Menu, ChevronDown, ChevronRight } from 'lucide-react';
+import { Book, MessageSquare, Send, Upload, Plus, Trash2, FileText, File as FilePdf, FileIcon, Smartphone, Navigation, Search, X, Menu, ChevronDown, ChevronRight, AlertCircle } from 'lucide-react';
 import * as pdfjs from 'pdfjs-dist';
 import * as mammoth from 'mammoth';
 
 // Set worker path for PDF.js
 pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
 
+// Replace with your actual backend URL
+const API_URL = 'https://triggr4bg.onrender.com';
+
 interface KnowledgeItem {
   id: string;
   title: string;
-  content: string;
+  content?: string;
   category: string;
   createdAt: Date;
   type: 'text' | 'pdf' | 'doc';
   fileSize?: string;
-  originalFile?: File;
+  fileUrl?: string;
 }
 
 interface Category {
@@ -50,9 +53,65 @@ function App() {
   const [processingProgress, setProcessingProgress] = useState(0);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [chatCategory, setChatCategory] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Check backend connection on load
+  useEffect(() => {
+    const checkBackendConnection = async () => {
+      try {
+        const response = await fetch(`${API_URL}/health`);
+        console.log('Backend connection:', response.ok ? 'successful' : 'failed');
+        if (!response.ok) {
+          setError('Cannot connect to the knowledge base. Please check your connection.');
+        }
+      } catch (error) {
+        console.error('Backend connection error:', error);
+        setError('Cannot connect to the knowledge base server.');
+      }
+    };
+    
+    checkBackendConnection();
+  }, []);
+
+  // Attempt to load documents from backend
+  useEffect(() => {
+    const loadDocuments = async () => {
+      try {
+        setIsLoading(true);
+        const response = await fetch(`${API_URL}/documents`);
+        
+        if (!response.ok) {
+          console.error('Failed to load documents, status:', response.status);
+          return;
+        }
+        
+        const data = await response.json();
+        if (data.documents && Array.isArray(data.documents)) {
+          const loadedItems = data.documents.map(doc => ({
+            id: doc.id,
+            title: doc.title,
+            category: doc.category === 'general' ? '1' : '2', // Map category to ID
+            createdAt: new Date(doc.created_at || Date.now()),
+            type: doc.file_type === 'pdf' ? 'pdf' : doc.file_type === 'doc' ? 'doc' : 'text',
+            fileSize: doc.word_count ? `${doc.word_count} words` : undefined,
+            fileUrl: doc.file_url
+          }));
+          
+          setKnowledgeItems(loadedItems);
+        }
+      } catch (e) {
+        console.error('Error loading documents:', e);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadDocuments();
+  }, []);
 
   // Scroll to bottom of chat when messages change
   useEffect(() => {
@@ -61,21 +120,56 @@ function App() {
     }
   }, [chatMessages]);
 
-  const handleAddKnowledgeItem = () => {
+  const handleAddKnowledgeItem = async () => {
     if (!newItemTitle.trim() || !newItemContent.trim() || !selectedCategory) return;
     
-    const newItem: KnowledgeItem = {
-      id: Date.now().toString(),
-      title: newItemTitle,
-      content: newItemContent,
-      category: selectedCategory,
-      createdAt: new Date(),
-      type: 'text'
-    };
+    setIsLoading(true);
+    setError(null);
     
-    setKnowledgeItems([...knowledgeItems, newItem]);
-    setNewItemTitle('');
-    setNewItemContent('');
+    try {
+      // Convert text to File object for consistent API handling
+      const textBlob = new Blob([newItemContent], { type: 'text/plain' });
+      const textFile = new File([textBlob], `${newItemTitle}.txt`, { type: 'text/plain' });
+      
+      // Build form data
+      const formData = new FormData();
+      formData.append('file', textFile);
+      formData.append('category', selectedCategory);
+      formData.append('title', newItemTitle);
+      
+      // Send to API
+      const response = await fetch(`${API_URL}/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to add knowledge item');
+      }
+      
+      const result = await response.json();
+      
+      // Add to local state
+      const newItem: KnowledgeItem = {
+        id: result.item_id || Date.now().toString(),
+        title: newItemTitle,
+        content: newItemContent,
+        category: selectedCategory,
+        createdAt: new Date(),
+        type: 'text',
+        fileUrl: result.file_url
+      };
+      
+      setKnowledgeItems([...knowledgeItems, newItem]);
+      setNewItemTitle('');
+      setNewItemContent('');
+    } catch (err) {
+      console.error('Error adding knowledge item:', err);
+      setError(`Failed to add knowledge item: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleAddCategory = () => {
@@ -92,8 +186,28 @@ function App() {
     setSelectedCategory(newCategory.id);
   };
 
-  const handleDeleteKnowledgeItem = (id: string) => {
-    setKnowledgeItems(knowledgeItems.filter(item => item.id !== id));
+  const handleDeleteKnowledgeItem = async (id: string) => {
+    try {
+      setIsLoading(true);
+      
+      // Call API to delete
+      const response = await fetch(`${API_URL}/delete/${id}`, {
+        method: 'DELETE'
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete item');
+      }
+      
+      // Remove from local state
+      setKnowledgeItems(knowledgeItems.filter(item => item.id !== id));
+    } catch (err) {
+      console.error('Error deleting knowledge item:', err);
+      setError(`Failed to delete: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleGenerateWhatsappNumber = (categoryId: string) => {
@@ -107,7 +221,7 @@ function App() {
     ));
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!newMessage.trim() || !chatCategory) return;
     
     // Add user message
@@ -121,35 +235,51 @@ function App() {
     
     setChatMessages([...chatMessages, userMessage]);
     
-    // Simulate AI response
-    setTimeout(() => {
-      // Find relevant knowledge items based on the query and category
-      const relevantItems = knowledgeItems.filter(item => 
-        item.category === chatCategory &&
-        (item.content.toLowerCase().includes(newMessage.toLowerCase()) ||
-        item.title.toLowerCase().includes(newMessage.toLowerCase()))
-      );
+    try {
+      const categoryName = categories.find(c => c.id === chatCategory)?.name || '';
       
-      let responseContent = '';
+      // Call API to get response
+      const response = await fetch(`${API_URL}/query`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: newMessage,
+          category: categoryName
+        }),
+      });
       
-      if (relevantItems.length > 0) {
-        // Create a response based on the knowledge base
-        const itemsInfo = relevantItems.map(item => `"${item.title}"`).join(', ');
-        responseContent = `Based on ${itemsInfo} in your knowledge hub, I can tell you that ${relevantItems[0].content.substring(0, 150)}...`;
-      } else {
-        responseContent = "I don't have specific information about that in this category. Would you like to add this information to your knowledge hub?";
+      if (!response.ok) {
+        throw new Error(`Failed to get response: ${response.status}`);
       }
       
+      const result = await response.json();
+      
+      // Add AI response
       const aiMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
-        content: responseContent,
+        content: result.response || "I couldn't find an answer to your question.",
         sender: 'ai',
         timestamp: new Date(),
         category: chatCategory
       };
       
       setChatMessages(prevMessages => [...prevMessages, aiMessage]);
-    }, 1000);
+    } catch (err) {
+      console.error('Error getting AI response:', err);
+      
+      // Add error message
+      const errorMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        content: "Sorry, I encountered an error while processing your request. Please try again later.",
+        sender: 'ai',
+        timestamp: new Date(),
+        category: chatCategory
+      };
+      
+      setChatMessages(prevMessages => [...prevMessages, errorMessage]);
+    }
     
     setNewMessage('');
   };
@@ -160,46 +290,53 @@ function App() {
     
     setIsProcessingFile(true);
     setProcessingProgress(0);
+    setError(null);
     
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const fileName = file.name;
-      const fileSize = formatFileSize(file.size);
-      const fileType = file.type;
       
       try {
-        let content = '';
-        let type: 'pdf' | 'doc' = 'doc';
+        // Update progress
+        setProcessingProgress(((i + 0.5) / files.length) * 100);
         
-        // Extract text based on file type
-        if (fileType.includes('pdf')) {
-          content = await extractTextFromPDF(file);
-          type = 'pdf';
-        } else if (fileType.includes('word') || fileName.endsWith('.docx') || fileName.endsWith('.doc')) {
-          content = await extractTextFromDOCX(file);
-          type = 'doc';
-        } else {
-          alert(`Unsupported file type: ${fileType}`);
-          continue;
+        // Create FormData
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('category', selectedCategory || '2'); // Default to Documents category
+        formData.append('title', fileName);
+        
+        // Send file to backend
+        console.log(`Uploading file to ${API_URL}/upload`);
+        const response = await fetch(`${API_URL}/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Server returned ${response.status}`);
         }
+        
+        const result = await response.json();
+        console.log('Upload response:', result);
         
         // Create new knowledge item
         const newItem: KnowledgeItem = {
-          id: Date.now().toString() + i,
+          id: result.item_id || Date.now().toString() + i,
           title: fileName,
-          content: content,
-          category: '2', // Documents category
+          category: selectedCategory || '2',
           createdAt: new Date(),
-          type: type,
-          fileSize: fileSize,
-          originalFile: file
+          type: fileName.toLowerCase().endsWith('.pdf') ? 'pdf' : 'doc',
+          fileSize: formatFileSize(file.size),
+          fileUrl: result.file_url
         };
         
         setKnowledgeItems(prev => [...prev, newItem]);
         setProcessingProgress(((i + 1) / files.length) * 100);
       } catch (error) {
-        console.error(`Error processing file ${fileName}:`, error);
-        alert(`Failed to process ${fileName}`);
+        console.error(`Error uploading file ${fileName}:`, error);
+        setError(`Failed to upload ${fileName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }
     
@@ -255,7 +392,7 @@ function App() {
     const matchesCategory = !selectedCategory || item.category === selectedCategory;
     const matchesSearch = !searchQuery || 
       item.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      item.content.toLowerCase().includes(searchQuery.toLowerCase());
+      (item.content && item.content.toLowerCase().includes(searchQuery.toLowerCase()));
     
     return matchesCategory && matchesSearch;
   });
@@ -358,6 +495,24 @@ function App() {
       </header>
       
       <main className="flex-grow container mx-auto px-4 py-8">
+        {/* Display error message if present */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 flex items-start">
+            <AlertCircle size={20} className="mr-2 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-medium">Error</p>
+              <p>{error}</p>
+            </div>
+          </div>
+        )}
+        
+        {isLoading && (
+          <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg mb-6">
+            <p className="font-medium">Loading...</p>
+            <p>Please wait while we process your request.</p>
+          </div>
+        )}
+        
         {activeTab === 'hub' && (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="md:col-span-1 bg-white rounded-lg shadow-md p-4">
@@ -503,8 +658,9 @@ function App() {
                         )}
                         
                         <p className="text-gray-600 text-sm mb-2 line-clamp-3">
-                          {item.content.substring(0, 150)}
-                          {item.content.length > 150 ? '...' : ''}
+                          {item.content 
+                            ? `${item.content.substring(0, 150)}${item.content.length > 150 ? '...' : ''}` 
+                            : 'Content stored on server'}
                         </p>
                         
                         <div className="flex justify-between items-center text-xs text-gray-500">
@@ -582,7 +738,7 @@ function App() {
                   <button
                     onClick={handleAddKnowledgeItem}
                     className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
-                    disabled={!newItemTitle || !newItemContent || !selectedCategory}
+                    disabled={!newItemTitle || !newItemContent || !selectedCategory || isLoading}
                   >
                     Add Knowledge Item
                   </button>
@@ -608,7 +764,7 @@ function App() {
                       {category.whatsappNumber ? (
                         <div className="bg-green-50 border border-green-200 rounded-lg p-3">
                           <div className="flex items-center mb-2">
-                            <Smartphone size={18} className="text-green-600 mr-2" />
+                          <Smartphone size={18} className="text-green-600 mr-2" />
                             <span className="font-medium text-green-800">WhatsApp Number</span>
                           </div>
                           <p className="text-lg font-semibold text-green-700">{category.whatsappNumber}</p>
@@ -680,7 +836,7 @@ function App() {
                     className="w-full px-3 py-2 border rounded-md mb-2"
                   >
                     <option value="" disabled>Select a category</option>
-                    {categories.filter(c => c.whatsappNumber).map(category => (
+                    {categories.map(category => (
                       <option key={category.id} value={category.id}>
                         {category.name}
                       </option>
@@ -734,13 +890,13 @@ function App() {
               </div>
               
               <div className="md:col-span-3">
-                {chatCategory && getCategoryWhatsappNumber(chatCategory) ? (
+                {chatCategory ? (
                   <div className="border rounded-lg flex flex-col h-[500px]">
                     <div className="bg-green-500 text-white p-3 rounded-t-lg flex items-center">
                       <Smartphone size={20} className="mr-2" />
                       <span className="font-medium">
                         WhatsApp Chat - {categories.find(c => c.id === chatCategory)?.name} 
-                        ({getCategoryWhatsappNumber(chatCategory)})
+                        {getCategoryWhatsappNumber(chatCategory) ? ` (${getCategoryWhatsappNumber(chatCategory)})` : ''}
                       </span>
                     </div>
                     
@@ -791,6 +947,7 @@ function App() {
                       <button
                         onClick={handleSendMessage}
                         className="px-4 py-2 bg-green-500 text-white rounded-r-md hover:bg-green-600 transition-colors"
+                        disabled={!newMessage.trim()}
                       >
                         <Send size={20} />
                       </button>
@@ -801,16 +958,8 @@ function App() {
                     <MessageSquare size={48} className="text-gray-400 mb-4" />
                     <h3 className="text-lg font-medium text-gray-700 mb-2">Chat Not Available</h3>
                     <p className="text-gray-600 mb-4">
-                      {!chatCategory 
-                        ? "Select a category to chat with" 
-                        : "Generate a WhatsApp number for this category first to enable the chat simulation."}
+                      Select a category to chat with.
                     </p>
-                    <button
-                      onClick={() => setActiveTab('whatsapp')}
-                      className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
-                    >
-                      Go to WhatsApp Integration
-                    </button>
                   </div>
                 )}
               </div>
