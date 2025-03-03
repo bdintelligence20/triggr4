@@ -3,6 +3,8 @@ Flask[async]
 flask-cors
 flask-limiter
 gunicorn
+threading
+requests
 
 # Async Support
 aiohttp

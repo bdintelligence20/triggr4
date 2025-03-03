@@ -10,6 +10,8 @@ from werkzeug.utils import secure_filename
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+import threading
+import requests
 import asyncio
 import aiohttp
 
@@ -431,7 +433,7 @@ def upload_document():
         local_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(local_path)
         
-        # Extract text (simplified to reduce memory usage)
+        # Extract text
         if filename.lower().endswith('.pdf'):
             file_type = 'pdf'
             content = extract_text_from_pdf(local_path)
@@ -471,18 +473,15 @@ def upload_document():
         # Clean up local file
         os.remove(local_path)
         
-        # Queue document for background processing - here we'll use a flag in Firestore
-        # In a production app, you'd use a proper task queue
-        
-        # Schedule a lightweight endpoint call to process this document
-        # This creates a background task without blocking the current request
-        process_url = f"/process-document/{item_id}"
-        threading.Thread(target=lambda: requests.get(
-            f"http://localhost:{os.environ.get('PORT', '10000')}{process_url}"
-        )).start()
+        # Start immediate processing in the same request (not ideal, but simple)
+        try:
+            process_document_now(item_id)
+        except Exception as e:
+            logger.error(f"Background processing error for {item_id}: {str(e)}")
+            # We don't fail the request if background processing fails
         
         return jsonify({
-            "message": "File uploaded and queued for processing",
+            "message": "File uploaded successfully",
             "item_id": item_id,
             "status": "processing"
         })
@@ -493,9 +492,8 @@ def upload_document():
             os.remove(local_path)
         return jsonify({"error": f"Failed to process document: {str(e)}"}), 500
     
-@app.route('/process-document/<item_id>', methods=['GET'])
-def process_document(item_id):
-    """Process document embeddings in the background."""
+def process_document_now(item_id):
+    """Process document embeddings."""
     try:
         # Get the document
         doc_ref = db.collection("knowledge_items").document(item_id)
@@ -503,7 +501,7 @@ def process_document(item_id):
         
         if not doc.exists:
             logger.error(f"Document {item_id} not found")
-            return jsonify({"error": "Document not found"}), 404
+            return
             
         doc_data = doc.to_dict()
         
@@ -519,8 +517,8 @@ def process_document(item_id):
         chunks = chunk_text(content, chunk_size=400, overlap=50)
         logger.info(f"Processing {len(chunks)} chunks for document {item_id}")
         
-        # Process max 10 chunks at a time to avoid memory issues
-        max_chunks_per_batch = 10
+        # Process max 5 chunks at a time to avoid memory issues
+        max_chunks_per_batch = 5
         total_chunks = len(chunks)
         
         # Store processed chunks count
@@ -528,6 +526,8 @@ def process_document(item_id):
             "total_chunks": total_chunks,
             "processed_chunks": 0
         })
+        
+        vectors_processed = 0
         
         for i in range(0, total_chunks, max_chunks_per_batch):
             end_idx = min(i + max_chunks_per_batch, total_chunks)
@@ -557,15 +557,14 @@ def process_document(item_id):
                 
                 # Upload to Pinecone
                 if vectors:
-                    try:
-                        index.upsert(vectors=vectors)
-                        logger.info(f"Upserted vectors {i} to {end_idx-1} for document {item_id}")
-                    except Exception as e:
-                        logger.error(f"Failed to upsert vectors: {str(e)}")
+                    index.upsert(vectors=vectors)
+                    vectors_processed += len(vectors)
+                    logger.info(f"Upserted vectors {i} to {end_idx-1} for document {item_id}")
                 
                 # Update progress
                 doc_ref.update({
-                    "processed_chunks": end_idx
+                    "processed_chunks": end_idx,
+                    "vectors_processed": vectors_processed
                 })
                 
             except Exception as e:
@@ -580,7 +579,7 @@ def process_document(item_id):
         })
         
         logger.info(f"Completed processing document {item_id}")
-        return jsonify({"status": "success"})
+        return {"status": "success"}
         
     except Exception as e:
         logger.error(f"Error processing document {item_id}: {str(e)}")
@@ -590,8 +589,9 @@ def process_document(item_id):
                 "processing_status": "failed",
                 "error": str(e)
             })
-        return jsonify({"status": "error", "message": str(e)}), 500
-
+        return {"status": "error", "message": str(e)}
+    
+    
 @app.route('/document-status/<item_id>', methods=['GET'])
 def document_status(item_id):
     """Check the processing status of a document."""
