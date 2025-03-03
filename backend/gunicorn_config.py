@@ -1,0 +1,9 @@
+bind = "0.0.0.0:10000"
+workers = 2  # Reduce number of workers
+threads = 2
+worker_class = "sync"  # Use sync workers instead of async
+worker_connections = 10
+timeout = 120  # Increase timeout for large files
+max_requests = 200
+max_requests_jitter = 50
+preload_app = False  # Don't preload to save memory
