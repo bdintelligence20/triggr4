@@ -30,13 +30,12 @@ FIREBASE_CRED_JSON = os.environ.get("FIREBASE_CRED_JSON")
 GCS_CRED_JSON = os.environ.get("GCS_CRED_JSON")
 GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME")  # e.g., "knowledge-hub-files"
 
-# Ensure all required variables are provided.
 if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_FROM and
         PINECONE_API_KEY and PINECONE_ENVIRONMENT and PINECONE_INDEX_NAME and
         ANTHROPIC_API_KEY and OPENAI_API_KEY and FIREBASE_CRED_JSON and GCS_CRED_JSON and GCS_BUCKET_NAME):
     raise Exception("One or more required environment variables are missing.")
 
-# Replace escaped newlines with actual newlines if necessary
+# Replace escaped newlines with actual newlines if needed.
 FIREBASE_CRED_JSON = FIREBASE_CRED_JSON.replace('\\n', '\n')
 GCS_CRED_JSON = GCS_CRED_JSON.replace('\\n', '\n')
 
@@ -112,13 +111,52 @@ def get_embeddings(chunks: list) -> list:
     embeddings = [data['embedding'] for data in response['data']]
     return embeddings
 
-def call_claude_api(prompt: str) -> str:
-    anthro_prompt = f"{anthropic.HUMAN_PROMPT}{prompt}{anthropic.AI_PROMPT}"
-    response = anthropic_client.completion(
-        prompt=anthro_prompt,
-        model="claude-v1",
-        max_tokens_to_sample=300,
-        stop_sequences=[anthropic.HUMAN_PROMPT]
+def call_claude_rag(context: str, question: str) -> str:
+    """
+    Improved RAG: Uses Anthropic's Claude 3.5 Sonnet model with an in-depth prompt.
+    The context and question are injected into the prompt template.
+    """
+    template = (
+        "You are a helpful AI assistant tasked with answering questions based on provided context. "
+        "Your goal is to provide accurate and relevant answers using only the information given to you. Here's how you should proceed:\n\n"
+        "First, carefully read and analyze the following context:\n\n"
+        "<context>\n{{CONTEXT}}\n</context>\n\n"
+        "Now, you will be presented with a question. Your task is to answer this question using only the information provided in the context above. Here's the question:\n\n"
+        "<question>\n{{QUESTION}}\n</question>\n\n"
+        "To answer the question effectively:\n\n"
+        "1. Carefully review the context and identify information relevant to the question.\n"
+        "2. Formulate a clear and concise answer based solely on the provided context.\n"
+        "3. If the question cannot be fully answered using the given context, state this clearly and provide whatever partial information you can from the context.\n"
+        "4. Do not include any information or assumptions that are not explicitly stated in or directly implied by the context.\n\n"
+        "Format your response as follows:\n\n"
+        "1. Begin with your answer to the question, enclosed in <answer> tags.\n"
+        "2. After your answer, provide a brief explanation of how you arrived at your answer, enclosed in <explanation> tags. "
+        "This should reference specific parts of the context that support your answer.\n\n"
+        "Important reminders:\n\n"
+        "- Stick strictly to the information provided in the context. Do not introduce external knowledge or make assumptions beyond what is given.\n"
+        "- If the context doesn't contain enough information to answer the question fully, it's okay to say so. Provide whatever relevant information you can from the context, "
+        "and explain what additional information would be needed to give a complete answer.\n"
+        "- Be concise but thorough in your answer and explanation.\n"
+        "- If the question asks for an opinion or judgment that isn't explicitly stated in the context, clarify that you can't provide personal opinions and instead offer relevant factual information from the context.\n\n"
+        "Please proceed with answering the question based on these instructions."
+    )
+    # Replace the placeholders with actual context and question.
+    prompt_text = template.replace("{{CONTEXT}}", context).replace("{{QUESTION}}", question)
+    response = anthropic_client.messages.create(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens_to_sample=8192,
+        temperature=1,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": prompt_text,
+                    }
+                ]
+            }
+        ]
     )
     return response.get("completion", "").strip()
 
@@ -216,16 +254,19 @@ def query():
     if not query_text:
         return jsonify({"error": "No query provided"}), 400
 
+    # Retrieve query embedding
     try:
         response = openai.Embedding.create(input=[query_text], model="text-embedding-ada-002")
         query_embedding = response['data'][0]['embedding']
     except Exception as e:
         return jsonify({"error": "Failed to get query embedding", "details": str(e)}), 500
 
+    # Query Pinecone for matching chunks, filtering by category if provided.
     filter_query = {"category": category} if category else None
     query_response = index.query(vector=query_embedding, top_k=5, filter=filter_query)
     retrieved_chunks = query_response.get('matches', [])
 
+    # Assemble context from retrieved chunks.
     context_lines = []
     for match in retrieved_chunks:
         meta = match.get('metadata', {})
@@ -233,10 +274,10 @@ def query():
         chunk_index = meta.get('chunk_index', '')
         context_lines.append(f"{title} (chunk {chunk_index})")
     context = "\n".join(context_lines)
-    prompt = f"Context:\n{context}\n\nUser Query: {query_text}\n\nAnswer:"
 
+    # Use the improved RAG function.
     try:
-        ai_response = call_claude_api(prompt)
+        ai_response = call_claude_rag(context, query_text)
     except Exception as e:
         return jsonify({"error": "Failed to get AI response", "details": str(e)}), 500
 
@@ -268,9 +309,8 @@ def whatsapp_webhook():
             chunk_index = meta.get('chunk_index', '')
             context_lines.append(f"{title} (chunk {chunk_index})")
         context = "\n".join(context_lines)
-        prompt = f"Context:\n{context}\n\nUser Query: {incoming_msg}\n\nAnswer:"
         try:
-            ai_response = call_claude_api(prompt)
+            ai_response = call_claude_rag(context, incoming_msg)
         except Exception as e:
             ai_response = "Error generating AI response."
             print("Claude API error:", e)
