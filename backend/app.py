@@ -2,44 +2,102 @@ import os
 import uuid
 import json
 import base64
+import logging
 from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
-import logging
+import traceback
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, 
+                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Load credentials from environment
-PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+# -------------------------------
+# Load External Service Credentials from Environment Variables
+# -------------------------------
+
+# API Keys
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
+PINECONE_INDEX_NAME = "knowledge-hub-vectors"
 
 # Firebase credentials
 firebase_cred_b64 = os.environ.get("FIREBASE_CRED_B64")
-firebase_cred_json_str = base64.b64decode(firebase_cred_b64).decode("utf-8")
-firebase_cred_info = json.loads(firebase_cred_json_str)
+gcs_cred_b64 = os.environ.get("GCS_CRED_B64")
+GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "knowledge-hub-files")
 
-# Initialize Firebase
+# Validate required environment variables
+if not (OPENAI_API_KEY and ANTHROPIC_API_KEY and PINECONE_API_KEY and 
+        firebase_cred_b64 and gcs_cred_b64):
+    logger.critical("Missing required environment variables")
+    missing = []
+    if not OPENAI_API_KEY: missing.append("OPENAI_API_KEY")
+    if not ANTHROPIC_API_KEY: missing.append("ANTHROPIC_API_KEY") 
+    if not PINECONE_API_KEY: missing.append("PINECONE_API_KEY")
+    if not firebase_cred_b64: missing.append("FIREBASE_CRED_B64")
+    if not gcs_cred_b64: missing.append("GCS_CRED_B64")
+    logger.critical(f"Missing: {', '.join(missing)}")
+    raise EnvironmentError("Missing required environment variables")
+
+# Decode Base64 credentials
+try:
+    firebase_cred_json_str = base64.b64decode(firebase_cred_b64).decode("utf-8")
+    gcs_cred_json_str = base64.b64decode(gcs_cred_b64).decode("utf-8")
+    firebase_cred_info = json.loads(firebase_cred_json_str)
+    gcs_cred_info = json.loads(gcs_cred_json_str)
+except Exception as e:
+    logger.critical(f"Failed to decode credentials: {str(e)}")
+    raise
+
+# -------------------------------
+# Initialize External Services
+# -------------------------------
+
+# Firebase Admin
 import firebase_admin
 from firebase_admin import credentials, firestore
-firebase_admin.initialize_app(credentials.Certificate(firebase_cred_info))
-db = firestore.client()
+try:
+    firebase_admin.initialize_app(credentials.Certificate(firebase_cred_info))
+    db = firestore.client()
+    logger.info("Firebase initialized successfully")
+except Exception as e:
+    logger.critical(f"Firebase initialization failed: {str(e)}")
+    raise
 
-# Initialize OpenAI
-from openai import OpenAI
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Google Cloud Storage
+from google.cloud import storage
+gcs_client = storage.Client.from_service_account_info(gcs_cred_info)
+bucket = gcs_client.bucket(GCS_BUCKET_NAME)
 
-# Initialize Anthropic
-import anthropic
-anthropic_client = anthropic.Client(api_key=ANTHROPIC_API_KEY)
+# Import text extraction and processing utilities
+import PyPDF2
+import docx2txt
 
-# Initialize Flask
+# Import custom modules for RAG functionality
+from embedding_utils import EmbeddingService, chunk_text
+from pinecone_client import PineconeClient
+from rag_system import RAGSystem
+
+# Initialize RAG components
+embedding_service = EmbeddingService(api_key=OPENAI_API_KEY)
+pinecone_client = PineconeClient(api_key=PINECONE_API_KEY, index_name=PINECONE_INDEX_NAME)
+rag_system = RAGSystem(
+    openai_api_key=OPENAI_API_KEY,
+    anthropic_api_key=ANTHROPIC_API_KEY,
+    pinecone_api_key=PINECONE_API_KEY,
+    index_name=PINECONE_INDEX_NAME
+)
+
+# -------------------------------
+# Flask App Configuration
+# -------------------------------
 app = Flask(__name__)
 CORS(app, origins=["*"], supports_credentials=True, methods=["GET", "POST", "OPTIONS", "DELETE", "PUT"])
 app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
-app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['ALLOWED_EXTENSIONS'] = {'pdf', 'doc', 'docx', 'txt'}
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 @app.after_request
@@ -49,68 +107,83 @@ def add_cors_headers(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
-# Extract text from files
-def extract_text(file_path, file_type):
-    if file_type == 'pdf':
-        import PyPDF2
+# -------------------------------
+# Helper Functions
+# -------------------------------
+
+def allowed_file(filename: str) -> bool:
+    """Check if a file has an allowed extension."""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
+def extract_text_from_pdf(file_path: str) -> str:
+    """Extract text content from a PDF file."""
+    text = ""
+    try:
         with open(file_path, "rb") as f:
             reader = PyPDF2.PdfReader(f)
-            text = ""
-            # Process up to 20 pages to save memory but get more content
-            for i in range(min(200, len(reader.pages))):
-                try:
-                    page_text = reader.pages[i].extract_text() or ""
+            # Process up to 50 pages to avoid memory issues
+            for i in range(min(50, len(reader.pages))):
+                page_text = reader.pages[i].extract_text()
+                if page_text:
                     text += page_text + "\n\n"
-                except Exception as e:
-                    logger.error(f"Error extracting PDF page {i}: {str(e)}")
-            return text[:10000000]  # Limit to 100K chars
-    elif file_type == 'doc':
-        import docx2txt
-        try:
-            text = docx2txt.process(file_path)
-            return text[:10000000]  # Limit to 100K chars
-        except Exception as e:
-            logger.error(f"Error extracting DOCX: {str(e)}")
-            return "Error extracting document text"
-    else:
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                return f.read(10000000)  # Limit to 100K chars
-        except Exception as e:
-            logger.error(f"Error reading text file: {str(e)}")
-            with open(file_path, 'rb') as f:
-                return f.read(10000000).decode('utf-8', errors='replace')  # Try binary read
+        return text
+    except Exception as e:
+        logger.error(f"PDF extraction error: {str(e)}")
+        raise
 
-# Routes
+def extract_text_from_docx(file_path: str) -> str:
+    """Extract text content from a DOCX file."""
+    try:
+        return docx2txt.process(file_path)
+    except Exception as e:
+        logger.error(f"DOCX extraction error: {str(e)}")
+        raise
+
+def extract_text_from_file(file_path: str, file_type: str) -> str:
+    """Extract text from a file based on its type."""
+    if file_type == 'pdf':
+        return extract_text_from_pdf(file_path)
+    elif file_type == 'doc':
+        return extract_text_from_docx(file_path)
+    elif file_type == 'txt':
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            return f.read()
+    else:
+        raise ValueError(f"Unsupported file type: {file_type}")
+
+# -------------------------------
+# Endpoints
+# -------------------------------
+
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint."""
-    return jsonify({"status": "healthy"})
-
-@app.route('/documents', methods=['GET'])
-def list_documents():
-    """List all documents in Firestore."""
+    """Health check endpoint for monitoring."""
     try:
-        docs = db.collection("knowledge_items").stream()
-        items = []
-        for doc in docs:
-            data = doc.to_dict()
-            items.append({
-                "id": doc.id,
-                "title": data.get("title", "Untitled"),
-                "category": data.get("category", "general"),
-                "file_type": data.get("file_type", "text"),
-                "created_at": data.get("created_at"),
-                "has_embeddings": data.get("has_embeddings", False)
-            })
-        return jsonify({"documents": items})
+        # Basic DB check
+        db.collection("system_status").document("health").set({"last_check": firestore.SERVER_TIMESTAMP})
+        
+        # Pinecone check
+        index_stats = pinecone_client.index.describe_index_stats()
+        vector_count = index_stats.get("total_vector_count", 0)
+        
+        return jsonify({
+            "status": "healthy",
+            "services": {
+                "firebase": "connected",
+                "pinecone": "connected",
+                "vectors_count": vector_count
+            }
+        })
     except Exception as e:
-        logger.error(f"Error listing documents: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Health check failed: {str(e)}")
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e)
+        }), 500
 
 @app.route('/upload', methods=['POST'])
 def upload_document():
-    """Upload a document to Firestore only - no embeddings."""
+    """Upload and process a document for the knowledge base."""
     if 'file' not in request.files:
         return jsonify({"error": "No file provided"}), 400
 
@@ -121,7 +194,10 @@ def upload_document():
     logger.info(f"Upload request received: {title}, category: {category}")
 
     if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
+        return jsonify({"error": "Empty filename"}), 400
+        
+    if not allowed_file(file.filename):
+        return jsonify({"error": f"Unsupported file type. Allowed types: {', '.join(app.config['ALLOWED_EXTENSIONS'])}"}), 400
 
     try:
         # Save file locally
@@ -129,241 +205,247 @@ def upload_document():
         local_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(local_path)
         
-        # Determine file type
+        # Determine file type and extract text
         if filename.lower().endswith('.pdf'):
             file_type = 'pdf'
+            content = extract_text_from_pdf(local_path)
         elif filename.lower().endswith(('.doc', '.docx')):
             file_type = 'doc'
+            content = extract_text_from_docx(local_path)
         elif filename.lower().endswith('.txt'):
             file_type = 'txt'
+            with open(local_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
         else:
             return jsonify({"error": "Unsupported file type"}), 400
-        
-        # Extract text with conservative memory usage
-        try:
-            content = extract_text(local_path, file_type)
-            logger.info(f"Extracted {len(content)} characters from file")
-        except Exception as e:
-            logger.error(f"Error extracting text: {str(e)}")
-            content = f"Error extracting text: {str(e)}"[:1000000]
-        
-        # Store in Firestore
-        doc_ref = db.collection("knowledge_items").document()
+            
+        if not content or len(content.strip()) < 10:
+            return jsonify({"error": "Could not extract meaningful content from file"}), 400
+
+        # Upload file to Google Cloud Storage
+        gcs_filename = f"documents/{uuid.uuid4()}_{filename}"
+        blob = bucket.blob(gcs_filename)
+        blob.upload_from_filename(local_path)
+        file_url = blob.public_url
+
+        # Save metadata and content to Firebase Firestore
         doc_data = {
             "title": title,
             "content": content,
             "category": category,
             "file_type": file_type,
+            "file_url": file_url,
+            "word_count": len(content.split()),
             "created_at": firestore.SERVER_TIMESTAMP,
-            "has_embeddings": False
+            "processing_status": "processing"  # Initial status
         }
+        doc_ref = db.collection("knowledge_items").document()
         doc_ref.set(doc_data)
-        logger.info(f"Saved document to Firestore with ID: {doc_ref.id}")
-        
-        # Clean up
+        item_id = doc_ref.id
+        logger.info(f"Saved document to Firestore with ID: {item_id}")
+
+        # Process document with our RAG system
+        try:
+            # Process document in background
+            num_vectors = rag_system.process_document(content, item_id, namespace="global_knowledge_base")
+            
+            # Update document status
+            doc_ref.update({
+                "processing_status": "completed",
+                "vectors_stored": num_vectors
+            })
+            
+            logger.info(f"Document processed successfully: {item_id}, vectors: {num_vectors}")
+        except Exception as e:
+            logger.error(f"Error processing document {item_id}: {str(e)}")
+            doc_ref.update({
+                "processing_status": "failed",
+                "error": str(e)
+            })
+
+        # Clean up temporary file
         os.remove(local_path)
-        
+
         return jsonify({
-            "message": "File uploaded successfully",
-            "item_id": doc_ref.id
+            "message": "File uploaded and processed successfully",
+            "item_id": item_id,
+            "file_url": file_url,
+            "vectors_stored": num_vectors if 'num_vectors' in locals() else 0
         })
+        
     except Exception as e:
         logger.error(f"Upload error: {str(e)}")
+        # Clean up if needed
         if 'local_path' in locals() and os.path.exists(local_path):
             os.remove(local_path)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Failed to process document: {str(e)}"}), 500
 
 @app.route('/query', methods=['POST'])
 def query():
-    """Query documents using simple keyword search (no vectors)."""
+    """Query the knowledge base using RAG."""
     data = request.get_json()
     query_text = data.get("query")
     category = data.get("category")
     
     logger.info(f"Query received: '{query_text}', category: '{category}'")
     
-    if not query_text:
-        return jsonify({"error": "No query provided"}), 400
-    
+    if not query_text or not isinstance(query_text, str) or len(query_text.strip()) < 2:
+        return jsonify({"error": "Invalid or empty query"}), 400
+
     try:
-        # Get all documents with flexible category matching
-        if category:
-            logger.info(f"Filtering documents by category: {category}")
-            # Try multiple ways to match the category
-            category_docs = list(db.collection("knowledge_items").where("category", "==", category).stream())
-            
-            if not category_docs:
-                # Try another approach since the previous match might have failed
-                logger.info(f"No exact category match, trying with more flexible matching")
-                all_docs = list(db.collection("knowledge_items").stream())
-                docs = []
-                
-                # Manually filter to be more flexible
-                for doc in all_docs:
-                    doc_data = doc.to_dict()
-                    doc_category = str(doc_data.get("category", "")).lower()
-                    
-                    # Try to match in various ways
-                    if (category.lower() in doc_category or 
-                        doc_category in category.lower() or
-                        # For numeric categories that might be stored as strings or numbers
-                        str(category) == doc_category):
-                        docs.append(doc)
-                
-                if not docs:
-                    logger.info("Still no matches, searching all documents")
-                    docs = all_docs
-            else:
-                docs = category_docs
-        else:
-            logger.info("Getting all documents")
-            docs = db.collection("knowledge_items").stream()
+        # Log query for analytics
+        db.collection("queries").add({
+            "query": query_text,
+            "category": category,
+            "timestamp": firestore.SERVER_TIMESTAMP,
+            "client_ip": request.remote_addr
+        })
         
-        # Simple keyword search
-        results = []
-        query_terms = query_text.lower().split()
-        logger.info(f"Query terms: {query_terms}")
-        
-        doc_count = 0
-        for doc in docs:
-            doc_count += 1
-            data = doc.to_dict()
-            content = data.get("content", "").lower()
-            title = data.get("title", "").lower()
-            
-            # Log title for debugging
-            logger.info(f"Checking document: {title} (ID: {doc.id})")
-            
-            # More forgiving search logic
-            score = 0
-            
-            # First, try exact matches
-            for term in query_terms:
-                term_in_content = content.count(term)
-                term_in_title = title.count(term) * 2  # Title matches count more
-                score += term_in_content + term_in_title
-                
-                # Debug individual term matches
-                if term_in_content > 0 or term_in_title > 0:
-                    logger.info(f"  Term '{term}' found: {term_in_content} in content, {term_in_title} in title")
-            
-            # If no exact matches, try partial matching for longer terms
-            if score == 0:
-                for term in query_terms:
-                    # If term length is at least 4 characters, try partial matching
-                    if len(term) >= 4:
-                        for word in content.split():
-                            if term in word:
-                                score += 1
-                        for word in title.split():
-                            if term in word:
-                                score += 2
-            
-            logger.info(f"  Document score: {score}")
-            
-            if score > 0:
-                # Get a snippet of content around the first matching term for better context
-                snippet = content
-                for term in query_terms:
-                    if term in content:
-                        start_idx = max(0, content.find(term) - 200)
-                        end_idx = min(len(content), content.find(term) + 700)
-                        snippet = content[start_idx:end_idx]
-                        break
-                
-                results.append({
-                    "item_id": doc.id,
-                    "title": data.get("title"),
-                    "content": snippet + "..." if len(snippet) < len(content) else snippet,
-                    "score": score
-                })
-        
-        logger.info(f"Total documents checked: {doc_count}")
-        logger.info(f"Documents with matches: {len(results)}")
-        
-        # Sort by relevance
-        results.sort(key=lambda x: x["score"], reverse=True)
-        top_results = results[:3]  # Take top 3
-        
-        if not top_results:
-            logger.info("No relevant documents found")
-            return jsonify({
-                "response": "I couldn't find any relevant information in our knowledge base.",
-                "retrieved": []
-            })
-        
-        # Format context for Claude
-        context = "\n\n---\n\n".join([
-            f"Document: {item['title']}\n{item['content']}" for item in top_results
-        ])
-        
-        logger.info(f"Sending query to Claude with {len(top_results)} documents")
-        
-        # Call Claude
-        prompt = f"""
-        You are a helpful AI assistant tasked with answering questions based on provided context.
-        
-        Context:
-        {context}
-        
-        Question:
-        {query_text}
-        
-        Answer the question based only on the provided context. If the context doesn't contain relevant information, say so.
-        """
-        
-        response = anthropic_client.messages.create(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=8192,
-            temperature=0.7,
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
+        # Process query with RAG system
+        result = rag_system.query(
+            query_text, 
+            namespace="global_knowledge_base",
+            top_k=5,
+            category=category
         )
         
+        # Return response with sources
         return jsonify({
-            "response": response.content[0].text,
-            "retrieved": [{"title": item["title"]} for item in top_results]
+            "response": result["answer"],
+            "sources": result["sources"]
         })
         
     except Exception as e:
         logger.error(f"Query error: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to process query: {str(e)}"}), 500
+
+@app.route('/documents', methods=['GET'])
+def list_documents():
+    """List all documents in the knowledge base."""
+    try:
+        category = request.args.get('category')
+        limit = min(int(request.args.get('limit', 100)), 500)  # Cap at 500
+        
+        # Build query
+        query = db.collection("knowledge_items")
+        if category:
+            query = query.where("category", "==", category)
+        
+        # Execute query
+        docs = query.limit(limit).stream()
+        
+        # Format results
+        results = []
+        for doc in docs:
+            doc_data = doc.to_dict()
+            results.append({
+                "id": doc.id,
+                "title": doc_data.get("title", "Untitled"),
+                "category": doc_data.get("category", "general"),
+                "file_type": doc_data.get("file_type", "unknown"),
+                "created_at": doc_data.get("created_at", None),
+                "processing_status": doc_data.get("processing_status", "unknown"),
+                "vectors_stored": doc_data.get("vectors_stored", 0),
+                "word_count": doc_data.get("word_count", 0),
+                "file_url": doc_data.get("file_url", None)
+            })
+        
+        return jsonify({
+            "documents": results,
+            "count": len(results)
+        })
+        
+    except Exception as e:
+        logger.error(f"Document listing error: {str(e)}")
+        return jsonify({"error": f"Failed to list documents: {str(e)}"}), 500
 
 @app.route('/delete/<item_id>', methods=['DELETE'])
 def delete_document(item_id):
-    """Delete a document from Firestore."""
+    """Delete a document and its vectors from the knowledge base."""
     try:
-        db.collection("knowledge_items").document(item_id).delete()
+        # Get the document
+        doc_ref = db.collection("knowledge_items").document(item_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            return jsonify({"error": "Document not found"}), 404
+            
+        doc_data = doc.to_dict()
+        
+        # Delete from Pinecone using filter by source_id
+        try:
+            # We can't use the old delete by ID method, need to use filter instead
+            deleted = pinecone_client.index.delete(
+                filter={"source_id": item_id},
+                namespace="global_knowledge_base"
+            )
+            logger.info(f"Deleted vectors for document {item_id}")
+        except Exception as e:
+            logger.warning(f"Failed to delete vectors: {str(e)}")
+        
+        # Delete from GCS if URL exists
+        if 'file_url' in doc_data:
+            try:
+                file_path = doc_data['file_url'].split('/')[-1]
+                blob = bucket.blob(f"documents/{file_path}")
+                blob.delete()
+                logger.info(f"Deleted file from GCS: {file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to delete file from GCS: {str(e)}")
+        
+        # Delete from Firestore
+        doc_ref.delete()
+        
         return jsonify({"message": "Document deleted successfully"})
+        
     except Exception as e:
-        logger.error(f"Error deleting document: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Delete error: {str(e)}")
+        return jsonify({"error": f"Failed to delete document: {str(e)}"}), 500
 
 @app.route('/test-pinecone', methods=['GET'])
 def test_pinecone():
-    """Test endpoint to verify if Pinecone is working."""
+    """Test endpoint to verify Pinecone connectivity."""
     try:
-        # Initialize Pinecone with retry
-        from pinecone import Pinecone
-        pc = Pinecone(api_key=PINECONE_API_KEY)
+        # Get index stats
+        stats = pinecone_client.index.describe_index_stats()
         
-        # Just check if we can list indexes
-        indexes = pc.list_indexes()
+        # Create a test vector
+        test_vector_id = f"test_{int(time.time())}"
+        test_embedding = [0.1] * 1536  # Create a dummy vector 
+        test_metadata = {"test": True, "timestamp": time.time()}
+        
+        # Try to upsert
+        pinecone_client.index.upsert(
+            vectors=[(test_vector_id, test_embedding, test_metadata)],
+            namespace="test_namespace"
+        )
+        
+        # Try to query it back
+        query_result = pinecone_client.index.query(
+            vector=test_embedding,
+            top_k=1,
+            include_metadata=True,
+            namespace="test_namespace",
+            filter={"test": True}
+        )
+        
+        # Clean up test vector
+        pinecone_client.index.delete(ids=[test_vector_id], namespace="test_namespace")
         
         return jsonify({
             "status": "success",
-            "indexes": indexes
+            "index_stats": stats,
+            "test_query_result": query_result,
+            "message": "Pinecone connection is working properly"
         })
     except Exception as e:
-        logger.error(f"Pinecone test error: {str(e)}")
+        logger.error(f"Pinecone test failed: {str(e)}")
         return jsonify({
-            "status": "error", 
-            "message": str(e)
+            "status": "error",
+            "message": f"Pinecone test failed: {str(e)}"
         }), 500
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
+    # Use Gunicorn for production - this is for local development only
+    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))

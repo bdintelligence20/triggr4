@@ -11,7 +11,7 @@ asyncio
 
 # External Services
 firebase-admin
-pinecone
+pinecone-client
 twilio
 google-cloud-storage
 openai
@@ -22,7 +22,9 @@ PyPDF2
 docx2txt
 python-docx
 chardet
+tiktoken
 
 # Utilities
 typing-extensions
 python-dotenv
+requests
