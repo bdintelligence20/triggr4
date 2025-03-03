@@ -57,29 +57,29 @@ def extract_text(file_path, file_type):
             reader = PyPDF2.PdfReader(f)
             text = ""
             # Process up to 20 pages to save memory but get more content
-            for i in range(min(20, len(reader.pages))):
+            for i in range(min(200, len(reader.pages))):
                 try:
                     page_text = reader.pages[i].extract_text() or ""
                     text += page_text + "\n\n"
                 except Exception as e:
                     logger.error(f"Error extracting PDF page {i}: {str(e)}")
-            return text[:100000]  # Limit to 100K chars
+            return text[:10000000]  # Limit to 100K chars
     elif file_type == 'doc':
         import docx2txt
         try:
             text = docx2txt.process(file_path)
-            return text[:100000]  # Limit to 100K chars
+            return text[:10000000]  # Limit to 100K chars
         except Exception as e:
             logger.error(f"Error extracting DOCX: {str(e)}")
             return "Error extracting document text"
     else:
         try:
             with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                return f.read(100000)  # Limit to 100K chars
+                return f.read(10000000)  # Limit to 100K chars
         except Exception as e:
             logger.error(f"Error reading text file: {str(e)}")
             with open(file_path, 'rb') as f:
-                return f.read(100000).decode('utf-8', errors='replace')  # Try binary read
+                return f.read(10000000).decode('utf-8', errors='replace')  # Try binary read
 
 # Routes
 @app.route('/health', methods=['GET'])
@@ -145,7 +145,7 @@ def upload_document():
             logger.info(f"Extracted {len(content)} characters from file")
         except Exception as e:
             logger.error(f"Error extracting text: {str(e)}")
-            content = f"Error extracting text: {str(e)}"[:1000]
+            content = f"Error extracting text: {str(e)}"[:1000000]
         
         # Store in Firestore
         doc_ref = db.collection("knowledge_items").document()
@@ -315,6 +315,7 @@ def query():
         response = anthropic_client.messages.create(
             model="claude-3-5-sonnet-20241022",
             max_tokens=8192,
+            stream=true,
             temperature=0.7,
             messages=[
                 {
