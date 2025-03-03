@@ -6,8 +6,6 @@ import time
 from embedding_utils import EmbeddingService, chunk_text
 from pinecone_client import PineconeClient
 
-
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,7 +33,7 @@ class RAGSystem:
         
         logger.info("RAG system initialized successfully")
         
-    def process_document(self, doc_text, source_id, namespace="knowledge_base"):
+    def process_document(self, doc_text, source_id, namespace="global_knowledge_base"):
         """Process a document and store it in the vector database."""
         logger.info(f"Processing document: {source_id}")
         
@@ -59,7 +57,7 @@ class RAGSystem:
         
         return vectors_stored
         
-    def query(self, user_query, namespace="knowledge_base", top_k=5, category=None):
+    def query(self, user_query, namespace="global_knowledge_base", top_k=5, category=None):
         """Query the system with a user question and get an AI response."""
         logger.info(f"Processing query: '{user_query}'")
         
@@ -72,13 +70,14 @@ class RAGSystem:
                 "sources": []
             }
             
-        # Step 2: Query Pinecone with category filter if provided
-        filter_dict = {"category": category} if category else None
+        # Step 2: Query Pinecone with NO category filter to find all relevant matches
+        logger.info(f"Querying with namespace: {namespace}, top_k: {top_k}, with no category filter")
+        
         matched_docs = self.pinecone_client.query_vectors(
             query_embedding, 
             namespace=namespace,
             top_k=top_k,
-            filter_dict=filter_dict
+            filter_dict=None  # Remove category filter to find all matches
         )
         
         if not matched_docs:
@@ -97,8 +96,8 @@ class RAGSystem:
         sources = []
         for i, doc in enumerate(matched_docs, start=1):
             sources.append({
-                "id": doc['source_id'],
-                "relevance_score": doc['score']
+                "id": doc.get('source_id', 'unknown'),
+                "relevance_score": doc.get('score', 0)
             })
             
         try:

@@ -53,7 +53,7 @@ class PineconeClient:
                     logger.error("Max retries reached. Failed to initialize Pinecone.")
                     raise
 
-    def store_vectors(self, source_id, chunks, embeddings, namespace="knowledge_base", batch_size=10):
+    def store_vectors(self, source_id, chunks, embeddings, namespace="global_knowledge_base", batch_size=10):
         """Store embeddings and chunks in Pinecone with batching and retries."""
         if not self.index:
             raise ValueError("Pinecone index not initialized")
@@ -112,7 +112,7 @@ class PineconeClient:
             
             return total_vectors
     
-    def query_vectors(self, query_embedding, namespace="knowledge_base", top_k=5, filter_dict=None):
+    def query_vectors(self, query_embedding, namespace="global_knowledge_base", top_k=5, filter_dict=None):
         """Query Pinecone for the most similar vectors with retry logic."""
         if not self.index:
             raise ValueError("Pinecone index not initialized")
@@ -121,7 +121,7 @@ class PineconeClient:
         
         for attempt in range(max_retries):
             try:
-                logger.info(f"Querying Pinecone (attempt {attempt+1})")
+                logger.info(f"Querying Pinecone (attempt {attempt+1}) with namespace: '{namespace}', filter: {filter_dict}")
                 
                 # Include metadata in results
                 results = self.index.query(
