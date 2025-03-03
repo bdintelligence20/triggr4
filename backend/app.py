@@ -28,12 +28,17 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 # Firebase and Google Cloud Storage credentials (as full JSON strings)
 FIREBASE_CRED_JSON = os.environ.get("FIREBASE_CRED_JSON")
 GCS_CRED_JSON = os.environ.get("GCS_CRED_JSON")
-GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME")  # Should be "knowledge-hub-files"
+GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME")  # e.g., "knowledge-hub-files"
 
+# Ensure all required variables are provided.
 if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_FROM and
         PINECONE_API_KEY and PINECONE_ENVIRONMENT and PINECONE_INDEX_NAME and
         ANTHROPIC_API_KEY and OPENAI_API_KEY and FIREBASE_CRED_JSON and GCS_CRED_JSON and GCS_BUCKET_NAME):
     raise Exception("One or more required environment variables are missing.")
+
+# Replace escaped newlines with actual newlines if necessary
+FIREBASE_CRED_JSON = FIREBASE_CRED_JSON.replace('\\n', '\n')
+GCS_CRED_JSON = GCS_CRED_JSON.replace('\\n', '\n')
 
 # -------------------------------
 # Initialize External Services
