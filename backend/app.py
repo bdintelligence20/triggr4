@@ -262,7 +262,7 @@ def upload_document():
                 batch = chunks[i:i+batch_size]
                 logger.info(f"Generating embeddings for batch {i//batch_size + 1}")
                 response = client.embeddings.create(
-                    model="text-embedding-ada-002",
+                    model="text-embedding-3-large",
                     input=batch
                 )
                 batch_embeddings = [data.embedding for data in response.data]
