@@ -1,11 +1,27 @@
+# Web Framework
 Flask
 flask-cors
+flask-limiter
+gunicorn
+
+# Async Support
+aiohttp
+asyncio
+
+# External Services
 firebase-admin
-pinecone
+pinecone-client
 twilio
 google-cloud-storage
 openai
 anthropic
+
+# File Processing
 PyPDF2
 docx2txt
-gunicorn
+python-docx
+chardet
+
+# Utilities
+typing-extensions
+python-dotenv
