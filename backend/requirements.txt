@@ -1,5 +1,5 @@
 # Web Framework
-Flask
+Flask[async]
 flask-cors
 flask-limiter
 gunicorn
