@@ -3,14 +3,46 @@ import uuid
 import json
 from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
+from flask_cors import CORS
+
+# -------------------------------
+# Load External Service Credentials from Environment Variables
+# -------------------------------
+
+# Twilio
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
+TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM")
+
+# Pinecone
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
+PINECONE_ENVIRONMENT = os.environ.get("PINECONE_ENVIRONMENT")
+PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME")
+
+# Anthropic (Claude 3.5 Sonnet)
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+
+# OpenAI API Key for Embeddings
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+
+# Firebase and Google Cloud Storage credentials (as full JSON strings)
+FIREBASE_CRED_JSON = os.environ.get("FIREBASE_CRED_JSON")
+GCS_CRED_JSON = os.environ.get("GCS_CRED_JSON")
+GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME")  # Should be "knowledge-hub-files"
+
+if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_FROM and
+        PINECONE_API_KEY and PINECONE_ENVIRONMENT and PINECONE_INDEX_NAME and
+        ANTHROPIC_API_KEY and OPENAI_API_KEY and FIREBASE_CRED_JSON and GCS_CRED_JSON and GCS_BUCKET_NAME):
+    raise Exception("One or more required environment variables are missing.")
+
+# -------------------------------
+# Initialize External Services
+# -------------------------------
 
 # Firebase Admin
 import firebase_admin
 from firebase_admin import credentials, firestore
-firebase_cred_json = os.environ.get("FIREBASE_CRED_JSON")
-if not firebase_cred_json:
-    raise Exception("FIREBASE_CRED_JSON environment variable not set.")
-firebase_cred_info = json.loads(firebase_cred_json)
+firebase_cred_info = json.loads(FIREBASE_CRED_JSON)
 firebase_admin.initialize_app(credentials.Certificate(firebase_cred_info))
 db = firestore.client()
 
@@ -25,11 +57,7 @@ twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 # Google Cloud Storage
 from google.cloud import storage
-gcs_cred_json = os.environ.get("GCS_CRED_JSON")
-if not gcs_cred_json:
-    raise Exception("GCS_CRED_JSON environment variable not set.")
-gcs_client = storage.Client.from_service_account_info(json.loads(gcs_cred_json))
-GCS_BUCKET_NAME = "your-gcs-bucket-name"  # Replace with your actual bucket name
+gcs_client = storage.Client.from_service_account_info(json.loads(GCS_CRED_JSON))
 bucket = gcs_client.bucket(GCS_BUCKET_NAME)
 
 # OpenAI
@@ -45,9 +73,11 @@ import PyPDF2
 import docx2txt
 
 # -------------------------------
-# Flask App and Config
+# Flask App Configuration
 # -------------------------------
 app = Flask(__name__)
+CORS(app, origins=["https://triggr4.onrender.com"])
+
 app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
@@ -107,6 +137,7 @@ def upload_document():
     local_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(local_path)
 
+    # Extract text based on file type
     if filename.lower().endswith('.pdf'):
         file_type = 'pdf'
         try:
@@ -122,11 +153,13 @@ def upload_document():
     else:
         return jsonify({"error": "Unsupported file type"}), 400
 
+    # Upload file to Google Cloud Storage
     gcs_filename = f"documents/{uuid.uuid4()}_{filename}"
     blob = bucket.blob(gcs_filename)
     blob.upload_from_filename(local_path)
     file_url = blob.public_url
 
+    # Save metadata and content to Firebase Firestore
     doc_data = {
         "title": title,
         "content": content,
@@ -139,6 +172,7 @@ def upload_document():
     doc_ref.set(doc_data)
     item_id = doc_ref.id
 
+    # Partition content and compute embeddings
     chunks = chunk_text(content, chunk_size=500)
     if chunks:
         try:
@@ -236,6 +270,7 @@ def whatsapp_webhook():
             ai_response = "Error generating AI response."
             print("Claude API error:", e)
 
+    # Log the conversation to Firebase Firestore
     conversation_data = {
         "from": from_number,
         "message": incoming_msg,
