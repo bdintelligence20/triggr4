@@ -314,7 +314,7 @@ def query():
         
         response = anthropic_client.messages.create(
             model="claude-3-5-sonnet-20241022",
-            max_tokens_to_sample=4096,
+            max_tokens=8192,
             temperature=0.7,
             messages=[
                 {
