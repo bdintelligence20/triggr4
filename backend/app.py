@@ -25,10 +25,10 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 # OpenAI API Key for Embeddings
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-# Firebase and GCS Credentials (Base64-encoded strings)
+# Firebase and Google Cloud Storage credentials (Base64-encoded strings)
 firebase_cred_b64 = os.environ.get("FIREBASE_CRED_B64")
 gcs_cred_b64 = os.environ.get("GCS_CRED_B64")
-GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME")  # should be "knowledge-hub-files"
+GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME")  # Should be "knowledge-hub-files"
 
 if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_FROM and
         PINECONE_API_KEY and PINECONE_INDEX_NAME and
@@ -36,7 +36,7 @@ if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_FROM and
         firebase_cred_b64 and gcs_cred_b64 and GCS_BUCKET_NAME):
     raise Exception("One or more required environment variables are missing.")
 
-# Decode the Base64 encoded credentials into proper JSON strings
+# Decode Base64 credentials into proper JSON strings
 firebase_cred_json_str = base64.b64decode(firebase_cred_b64).decode("utf-8")
 gcs_cred_json_str = base64.b64decode(gcs_cred_b64).decode("utf-8")
 
@@ -52,11 +52,19 @@ firebase_admin.initialize_app(credentials.Certificate(firebase_cred_info))
 db = firestore.client()
 
 # Updated Pinecone Initialization using the new SDK
-from pinecone import Pinecone
+from pinecone import Pinecone, ServerlessSpec
 pc = Pinecone(
     api_key=PINECONE_API_KEY,
     host="https://knowledge-hub-vectors-d6aehd0.svc.gcp-us-central1-4a9f.pinecone.io"
 )
+# Check if the index exists; if not, create it with the correct specifications.
+if PINECONE_INDEX_NAME not in pc.list_indexes():
+    pc.create_index(
+        name=PINECONE_INDEX_NAME,
+        dimension=3072,
+        metric="cosine",
+        spec=ServerlessSpec(cloud="gcp", region="us-central1")
+    )
 index = pc.Index(PINECONE_INDEX_NAME)
 
 # Twilio Client
