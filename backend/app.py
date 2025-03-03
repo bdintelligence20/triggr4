@@ -184,7 +184,10 @@ def health_check():
 @app.route('/upload', methods=['POST'])
 def upload_document():
     """Upload and process a document for the knowledge base."""
+    logger.info("Upload endpoint called")
+    
     if 'file' not in request.files:
+        logger.info("No file in request")
         return jsonify({"error": "No file provided"}), 400
 
     file = request.files['file']
@@ -194,9 +197,11 @@ def upload_document():
     logger.info(f"Upload request received: {title}, category: {category}")
 
     if file.filename == '':
+        logger.info("Empty filename")
         return jsonify({"error": "Empty filename"}), 400
         
     if not allowed_file(file.filename):
+        logger.info(f"Unsupported file type: {file.filename}")
         return jsonify({"error": f"Unsupported file type. Allowed types: {', '.join(app.config['ALLOWED_EXTENSIONS'])}"}), 400
 
     try:
@@ -204,8 +209,9 @@ def upload_document():
         filename = secure_filename(file.filename)
         local_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(local_path)
+        logger.info(f"File saved to {local_path}")
         
-        # Determine file type and extract text
+        # Extract text based on file type
         if filename.lower().endswith('.pdf'):
             file_type = 'pdf'
             content = extract_text_from_pdf(local_path)
@@ -219,14 +225,10 @@ def upload_document():
         else:
             return jsonify({"error": "Unsupported file type"}), 400
             
+        logger.info(f"Extracted {len(content)} characters from file")
+        
         if not content or len(content.strip()) < 10:
             return jsonify({"error": "Could not extract meaningful content from file"}), 400
-
-        # Upload file to Google Cloud Storage
-        gcs_filename = f"documents/{uuid.uuid4()}_{filename}"
-        blob = bucket.blob(gcs_filename)
-        blob.upload_from_filename(local_path)
-        file_url = blob.public_url
 
         # Save metadata and content to Firebase Firestore
         doc_data = {
@@ -234,47 +236,99 @@ def upload_document():
             "content": content,
             "category": category,
             "file_type": file_type,
-            "file_url": file_url,
             "word_count": len(content.split()),
             "created_at": firestore.SERVER_TIMESTAMP,
-            "processing_status": "processing"  # Initial status
+            "processing_status": "processing"
         }
         doc_ref = db.collection("knowledge_items").document()
         doc_ref.set(doc_data)
         item_id = doc_ref.id
         logger.info(f"Saved document to Firestore with ID: {item_id}")
 
-        # Process document with our RAG system
+        # Skip the rag_system and directly process the document ourselves
+        # to diagnose any potential issues
         try:
-            # Process document in background
-            num_vectors = rag_system.process_document(content, item_id, namespace="global_knowledge_base")
+            # Manually create chunks
+            chunks = chunk_text(content)
+            logger.info(f"Split text into {len(chunks)} chunks")
             
-            # Update document status
+            # Generate embeddings directly
+            embeddings = []
+            batch_size = 5
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            
+            for i in range(0, len(chunks), batch_size):
+                batch = chunks[i:i+batch_size]
+                logger.info(f"Generating embeddings for batch {i//batch_size + 1}")
+                response = client.embeddings.create(
+                    model="text-embedding-ada-002",
+                    input=batch
+                )
+                batch_embeddings = [data.embedding for data in response.data]
+                embeddings.extend(batch_embeddings)
+                logger.info(f"Generated embeddings for batch {i//batch_size + 1}")
+            
+            # Create vectors
+            vectors = []
+            for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+                vector_id = f"{item_id}_{i}"
+                metadata = {
+                    "text": chunk,
+                    "item_id": item_id,
+                    "chunk_index": i,
+                    "category": category
+                }
+                vectors.append((vector_id, embedding, metadata))
+            
+            # Store vectors directly in Pinecone
+            batch_size = 10
+            for i in range(0, len(vectors), batch_size):
+                batch = vectors[i:i+batch_size]
+                logger.info(f"Upserting batch {i//batch_size + 1} to Pinecone")
+                
+                # Direct Pinecone upsert with retries
+                for attempt in range(3):
+                    try:
+                        pinecone_client.index.upsert(
+                            vectors=batch,
+                            namespace="global_knowledge_base"
+                        )
+                        logger.info(f"Successfully upserted batch {i//batch_size + 1}")
+                        break
+                    except Exception as e:
+                        logger.error(f"Pinecone upsert error (attempt {attempt+1}): {str(e)}")
+                        if attempt == 2:  # Last attempt
+                            raise
+                        import time
+                        time.sleep(1)  # Wait before retrying
+            
+            # Update status
             doc_ref.update({
                 "processing_status": "completed",
-                "vectors_stored": num_vectors
+                "vectors_stored": len(vectors)
             })
             
-            logger.info(f"Document processed successfully: {item_id}, vectors: {num_vectors}")
+            logger.info(f"Successfully processed document {item_id}: {len(vectors)} vectors stored")
+            
         except Exception as e:
-            logger.error(f"Error processing document {item_id}: {str(e)}")
+            logger.error(f"Document processing error: {str(e)}", exc_info=True)
             doc_ref.update({
                 "processing_status": "failed",
                 "error": str(e)
             })
+            # Don't re-raise, still return success for the upload
 
         # Clean up temporary file
         os.remove(local_path)
 
         return jsonify({
-            "message": "File uploaded and processed successfully",
+            "message": "File uploaded and processing started",
             "item_id": item_id,
-            "file_url": file_url,
-            "vectors_stored": num_vectors if 'num_vectors' in locals() else 0
+            "status": "success"
         })
         
     except Exception as e:
-        logger.error(f"Upload error: {str(e)}")
+        logger.error(f"Upload error: {str(e)}", exc_info=True)
         # Clean up if needed
         if 'local_path' in locals() and os.path.exists(local_path):
             os.remove(local_path)
