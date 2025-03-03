@@ -236,24 +236,24 @@ def get_embeddings(chunks: list) -> list:
     
     return embeddings
 
-def call_claude_rag(context: List[Dict[str, Any]], question: str) -> str:
+def call_claude_rag(context_items, question):
     """
-    Enhanced RAG with structured context and source attribution.
+    Enhanced RAG with structured context.
     
     Args:
-        context: List of context chunks with metadata
+        context_items: List of dictionaries with metadata and content
         question: User's question
     
     Returns:
         Formatted response from Claude
     """
-    # Format context with metadata for better traceability
+    # Format context for Claude
     formatted_context = []
-    for i, item in enumerate(context):
+    for i, item in enumerate(context_items):
         meta = item.get('metadata', {})
         title = meta.get('title', 'Unknown')
         content = item.get('content', '')
-        formatted_context.append(f"[{i+1}] {title}\n{content}\n")
+        formatted_context.append(f"[{i+1}] {title}\n{content}")
     
     context_text = "\n---\n".join(formatted_context)
     
@@ -389,8 +389,7 @@ def health_check():
         }), 500
 
 @app.route('/upload', methods=['POST'])
-@limiter.limit("10 per minute")
-async def upload_document():
+def upload_document():
     """Upload and process a document for the knowledge base."""
     if 'file' not in request.files:
         return jsonify({"error": "No file provided"}), 400
@@ -402,9 +401,6 @@ async def upload_document():
     if file.filename == '':
         return jsonify({"error": "Empty filename"}), 400
         
-    if not allowed_file(file.filename):
-        return jsonify({"error": f"Unsupported file type. Allowed types: {', '.join(app.config['ALLOWED_EXTENSIONS'])}"}), 400
-
     try:
         # Save file locally
         filename = secure_filename(file.filename)
@@ -428,19 +424,12 @@ async def upload_document():
         if not content or len(content.strip()) < 10:
             return jsonify({"error": "Could not extract meaningful content from file"}), 400
 
-        # Upload file to Google Cloud Storage
-        gcs_filename = f"documents/{uuid.uuid4()}_{filename}"
-        blob = bucket.blob(gcs_filename)
-        blob.upload_from_filename(local_path)
-        file_url = blob.public_url
-
         # Save metadata and content to Firebase Firestore
         doc_data = {
             "title": title,
             "content": content,
             "category": category,
             "file_type": file_type,
-            "file_url": file_url,
             "word_count": len(content.split()),
             "created_at": firestore.SERVER_TIMESTAMP
         }
@@ -453,27 +442,54 @@ async def upload_document():
         if not chunks:
             return jsonify({"error": "No content to process for embeddings"}), 400
 
-        # Get embeddings async
-        embeddings = await get_embeddings_async(chunks)
-
-        # Prepare vectors for Pinecone
+        # Get embeddings with new OpenAI API
         vectors = []
-        for idx, embedding in enumerate(embeddings):
-            vector_id = f"{item_id}_{idx}"
-            metadata = {
-                "item_id": item_id,
-                "chunk_index": idx,
-                "category": category,
-                "title": title,
-                "file_type": file_type
-            }
-            vectors.append((vector_id, embedding, metadata))
-            
-        # Upload vectors in batches to avoid timeouts
-        batch_size = 100
-        for i in range(0, len(vectors), batch_size):
-            batch = vectors[i:i+batch_size]
-            index.upsert(vectors=batch)
+        batch_size = 10  # Process in smaller batches
+        
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i+batch_size]
+            try:
+                # Use new OpenAI client syntax
+                response = client.embeddings.create(
+                    model="text-embedding-ada-002",
+                    input=batch
+                )
+                
+                # Extract embeddings from response
+                batch_embeddings = [item.embedding for item in response.data]
+                
+                # Create vectors for this batch
+                for idx, embedding in enumerate(batch_embeddings):
+                    vector_id = f"{item_id}_{i+idx}"
+                    metadata = {
+                        "item_id": item_id,
+                        "chunk_index": i+idx,
+                        "category": category,
+                        "title": title,
+                        "file_type": file_type
+                    }
+                    vectors.append((vector_id, embedding, metadata))
+                
+                # Log progress
+                logger.info(f"Generated embeddings for chunks {i} to {i+len(batch_embeddings)-1}")
+            except Exception as e:
+                logger.error(f"Error generating embeddings for batch {i}: {str(e)}")
+                # Continue with other batches
+        
+        # Upload vectors to Pinecone
+        if vectors:
+            try:
+                # Upload in batches
+                batch_size = 50
+                for i in range(0, len(vectors), batch_size):
+                    batch = vectors[i:i+batch_size]
+                    index.upsert(vectors=batch)
+                    logger.info(f"Uploaded vectors {i} to {i+len(batch)-1} to Pinecone")
+            except Exception as e:
+                logger.error(f"Error uploading vectors to Pinecone: {str(e)}")
+                return jsonify({"error": f"Failed to upload vectors: {str(e)}"}), 500
+        else:
+            return jsonify({"error": "No vectors generated"}), 500
 
         # Clean up temporary file
         os.remove(local_path)
@@ -481,20 +497,19 @@ async def upload_document():
         return jsonify({
             "message": "File uploaded and processed successfully",
             "item_id": item_id,
-            "file_url": file_url,
-            "chunks_processed": len(chunks)
+            "chunks_processed": len(chunks),
+            "vectors_uploaded": len(vectors)
         })
         
     except Exception as e:
         logger.error(f"Upload error: {str(e)}")
         # Clean up if needed
-        if os.path.exists(local_path):
+        if 'local_path' in locals() and os.path.exists(local_path):
             os.remove(local_path)
-        return jsonify({"error": "Failed to process document", "details": str(e)}), 500
+        return jsonify({"error": f"Failed to process document: {str(e)}"}), 500
 
 @app.route('/query', methods=['POST'])
-@limiter.limit("30 per minute")
-async def query():
+def query():
     """Query the knowledge base using RAG."""
     data = request.get_json()
     query_text = data.get("query")
@@ -504,29 +519,89 @@ async def query():
         return jsonify({"error": "Invalid or empty query"}), 400
 
     try:
-        # Log query for analytics
-        db.collection("queries").add({
-            "query": query_text,
-            "category": category,
-            "timestamp": firestore.SERVER_TIMESTAMP,
-            "client_ip": request.remote_addr
-        })
+        # Get embedding for the query using the new OpenAI client
+        response = client.embeddings.create(
+            model="text-embedding-ada-002",
+            input=[query_text]
+        )
+        query_embedding = response.data[0].embedding
         
-        # Retrieve context
-        context = await retrieve_context_for_query(query_text, category)
+        # Build filter for category if provided
+        filter_query = {"category": category} if category else None
         
-        if not context:
+        # Log query details for debugging
+        logger.info(f"Querying Pinecone with category filter: {filter_query}")
+        
+        # Query the vector database
+        query_response = index.query(
+            vector=query_embedding, 
+            top_k=5, 
+            filter=filter_query,
+            include_metadata=True
+        )
+        
+        matches = query_response.get('matches', [])
+        logger.info(f"Pinecone returned {len(matches)} matches")
+        
+        if not matches:
             return jsonify({
                 "response": "I couldn't find any relevant information in our knowledge base.",
                 "retrieved": []
             })
         
-        # Call Claude with the enhanced context
-        ai_response = call_claude_rag(context, query_text)
+        # Get content for matches
+        context_items = []
+        for match in matches:
+            meta = match.get('metadata', {})
+            item_id = meta.get('item_id')
+            chunk_index = meta.get('chunk_index')
+            
+            if not item_id:
+                continue
+                
+            try:
+                # Get the content from Firestore
+                doc = db.collection("knowledge_items").document(item_id).get()
+                if not doc.exists:
+                    continue
+                    
+                doc_data = doc.to_dict()
+                content = doc_data.get('content', '')
+                
+                # Split into chunks to find the specific one
+                chunks = chunk_text(content)
+                if chunk_index is not None and 0 <= chunk_index < len(chunks):
+                    context_text = chunks[chunk_index]
+                else:
+                    # If chunk index is invalid, use the first part of the content
+                    context_text = content[:1000] + "..."
+                
+                context_items.append({
+                    'metadata': meta,
+                    'content': context_text,
+                    'score': match.get('score', 0)
+                })
+            except Exception as e:
+                logger.error(f"Error retrieving document {item_id}: {str(e)}")
+        
+        if not context_items:
+            return jsonify({
+                "response": "I retrieved some documents, but couldn't extract their content.",
+                "retrieved": []
+            })
+        
+        # Format context for Claude
+        context_text = "\n\n---\n\n".join([
+            f"Document: {item['metadata'].get('title', 'Unknown')}\n{item['content']}" 
+            for item in context_items
+        ])
+        
+        # Call Claude with the context
+        ai_response = call_claude_rag(context_items, query_text)
         
         # Return simplified context metadata for frontend
         simplified_context = []
-        for item in context:
+        for item in context_items:
             meta = item.get('metadata', {})
             simplified_context.append({
                 "title": meta.get('title', 'Unknown'),
@@ -541,7 +616,7 @@ async def query():
         
     except Exception as e:
         logger.error(f"Query error: {str(e)}")
-        return jsonify({"error": "Failed to process query", "details": str(e)}), 500
+        return jsonify({"error": f"Failed to process query: {str(e)}"}), 500
 
 @app.route('/whatsapp-webhook', methods=['POST'])
 async def whatsapp_webhook():
