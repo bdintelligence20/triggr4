@@ -412,7 +412,7 @@ def health_check():
 
 @app.route('/upload', methods=['POST'])
 def upload_document():
-    """Upload document and queue it for processing."""
+    """Upload document but don't process it - just store in Firestore."""
     logger.info("Upload request received")
     
     if 'file' not in request.files:
@@ -433,28 +433,25 @@ def upload_document():
         local_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(local_path)
         
-        # Extract text
+        # Determine file type
         if filename.lower().endswith('.pdf'):
             file_type = 'pdf'
-            content = extract_text_from_pdf(local_path)
         elif filename.lower().endswith(('.doc', '.docx')):
             file_type = 'doc'
-            content = extract_text_from_docx(local_path)
         elif filename.lower().endswith('.txt'):
             file_type = 'txt'
-            with open(local_path, 'r', encoding='utf-8', errors='replace') as f:
-                content = f.read()
         else:
             return jsonify({"error": "Unsupported file type"}), 400
-            
-        logger.info(f"Extracted {len(content)} characters from file")
         
-        # Limit content size if needed
-        if len(content) > 200000:  # ~200KB
-            logger.info(f"Truncating content from {len(content)} to 200000 characters")
-            content = content[:200000] + "... (content truncated)"
+        # Extract text with very conservative memory usage
+        try:
+            content = extract_text_minimally(local_path, file_type)
+            logger.info(f"Extracted {len(content)} characters from file")
+        except Exception as e:
+            logger.error(f"Error extracting text: {str(e)}")
+            content = f"Error extracting text: {str(e)}"
         
-        # Save to Firestore first
+        # Save to Firestore first - WITHOUT processing embeddings
         doc_ref = db.collection("knowledge_items").document()
         doc_data = {
             "title": title,
@@ -463,8 +460,8 @@ def upload_document():
             "file_type": file_type,
             "word_count": len(content.split()),
             "created_at": firestore.SERVER_TIMESTAMP,
-            "processing_status": "pending",  # Mark for processing
-            "embedding_status": "pending"
+            "processing_status": "uploaded",  # Just mark as uploaded
+            "embedding_status": "not_started"
         }
         doc_ref.set(doc_data)
         item_id = doc_ref.id
@@ -473,17 +470,11 @@ def upload_document():
         # Clean up local file
         os.remove(local_path)
         
-        # Start immediate processing in the same request (not ideal, but simple)
-        try:
-            process_document_now(item_id)
-        except Exception as e:
-            logger.error(f"Background processing error for {item_id}: {str(e)}")
-            # We don't fail the request if background processing fails
-        
         return jsonify({
             "message": "File uploaded successfully",
             "item_id": item_id,
-            "status": "processing"
+            "status": "uploaded",
+            "note": "Embeddings will be processed manually to avoid memory issues"
         })
         
     except Exception as e:
@@ -491,107 +482,182 @@ def upload_document():
         if 'local_path' in locals() and os.path.exists(local_path):
             os.remove(local_path)
         return jsonify({"error": f"Failed to process document: {str(e)}"}), 500
+
+def extract_text_minimally(file_path, file_type):
+    """Extract text from files with minimal memory usage."""
+    if file_type == 'pdf':
+        # Process PDF page by page to minimize memory usage
+        text_parts = []
+        with open(file_path, "rb") as f:
+            reader = PyPDF2.PdfReader(f)
+            # Only process first 30 pages to reduce memory usage
+            max_pages = min(30, len(reader.pages))
+            for i in range(max_pages):
+                try:
+                    page = reader.pages[i]
+                    page_text = page.extract_text()
+                    if page_text:
+                        # Limit text per page to reduce memory usage
+                        text_parts.append(page_text[:5000])
+                except Exception as e:
+                    logger.error(f"Error extracting page {i}: {str(e)}")
+        
+        text = "\n\n".join(text_parts)
+        # Limit total text to reduce memory usage
+        return text[:100000]
     
-def process_document_now(item_id):
-    """Process document embeddings."""
+    elif file_type == 'doc':
+        # For Word docs, just extract with limiting
+        text = docx2txt.process(file_path)
+        return text[:100000]
+    
+    elif file_type == 'txt':
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            # Read in chunks to minimize memory usage
+            text = f.read(100000)  # Read max 100KB
+        return text
+    
+    else:
+        return "Unsupported file type"
+    
+@app.route('/process-one-chunk/<item_id>/<int:chunk_index>', methods=['GET'])
+def process_one_chunk(item_id, chunk_index):
+    """Process a single chunk for a document."""
     try:
         # Get the document
         doc_ref = db.collection("knowledge_items").document(item_id)
         doc = doc_ref.get()
         
         if not doc.exists:
-            logger.error(f"Document {item_id} not found")
-            return
+            return jsonify({"error": "Document not found"}), 404
             
         doc_data = doc.to_dict()
-        
-        # Update processing status
-        doc_ref.update({"processing_status": "processing"})
-        
         content = doc_data.get("content", "")
         category = doc_data.get("category", "general")
         title = doc_data.get("title", "Untitled")
         file_type = doc_data.get("file_type", "text")
         
-        # Process in very small chunks to avoid memory issues
+        # Get chunks
         chunks = chunk_text(content, chunk_size=400, overlap=50)
-        logger.info(f"Processing {len(chunks)} chunks for document {item_id}")
-        
-        # Process max 5 chunks at a time to avoid memory issues
-        max_chunks_per_batch = 5
         total_chunks = len(chunks)
         
-        # Store processed chunks count
+        if chunk_index >= total_chunks:
+            return jsonify({"error": f"Chunk index {chunk_index} out of range (total: {total_chunks})"}), 400
+        
+        # Update document if this is the first chunk
+        if chunk_index == 0:
+            doc_ref.update({
+                "processing_status": "processing",
+                "total_chunks": total_chunks,
+                "processed_chunks": 0
+            })
+        
+        # Process just one chunk
+        chunk = chunks[chunk_index]
+        
+        # Get embedding
+        response = client.embeddings.create(
+            model="text-embedding-ada-002",
+            input=[chunk]
+        )
+        
+        # Create vector
+        vector_id = f"{item_id}_{chunk_index}"
+        embedding = response.data[0].embedding
+        metadata = {
+            "item_id": item_id,
+            "chunk_index": chunk_index,
+            "category": category,
+            "title": title,
+            "file_type": file_type
+        }
+        
+        # Upload to Pinecone
+        index.upsert(vectors=[(vector_id, embedding, metadata)])
+        
+        # Update progress
         doc_ref.update({
-            "total_chunks": total_chunks,
-            "processed_chunks": 0
+            "processed_chunks": chunk_index + 1,
         })
         
-        vectors_processed = 0
-        
-        for i in range(0, total_chunks, max_chunks_per_batch):
-            end_idx = min(i + max_chunks_per_batch, total_chunks)
-            batch_chunks = chunks[i:end_idx]
+        # Check if this was the last chunk
+        if chunk_index == total_chunks - 1:
+            doc_ref.update({
+                "processing_status": "completed",
+                "embedding_status": "completed",
+                "completed_at": firestore.SERVER_TIMESTAMP
+            })
             
-            try:
-                # Get embeddings
-                response = client.embeddings.create(
-                    model="text-embedding-ada-002",
-                    input=batch_chunks
-                )
-                
-                # Create vectors
-                vectors = []
-                for j, embedding_data in enumerate(response.data):
-                    chunk_idx = i + j
-                    vector_id = f"{item_id}_{chunk_idx}"
-                    embedding = embedding_data.embedding
-                    metadata = {
-                        "item_id": item_id,
-                        "chunk_index": chunk_idx,
-                        "category": category,
-                        "title": title,
-                        "file_type": file_type
-                    }
-                    vectors.append((vector_id, embedding, metadata))
-                
-                # Upload to Pinecone
-                if vectors:
-                    index.upsert(vectors=vectors)
-                    vectors_processed += len(vectors)
-                    logger.info(f"Upserted vectors {i} to {end_idx-1} for document {item_id}")
-                
-                # Update progress
-                doc_ref.update({
-                    "processed_chunks": end_idx,
-                    "vectors_processed": vectors_processed
-                })
-                
-            except Exception as e:
-                logger.error(f"Error processing chunks {i} to {end_idx-1}: {str(e)}")
-                # Continue with next batch
-        
-        # Update final status
-        doc_ref.update({
-            "processing_status": "completed",
-            "embedding_status": "completed",
-            "completed_at": firestore.SERVER_TIMESTAMP
+        return jsonify({
+            "status": "success",
+            "chunk_index": chunk_index,
+            "total_chunks": total_chunks
         })
-        
-        logger.info(f"Completed processing document {item_id}")
-        return {"status": "success"}
         
     except Exception as e:
-        logger.error(f"Error processing document {item_id}: {str(e)}")
-        # Update status to failed
-        if 'doc_ref' in locals():
-            doc_ref.update({
-                "processing_status": "failed",
-                "error": str(e)
+        logger.error(f"Error processing chunk {chunk_index} for document {item_id}: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+    
+@app.route('/process-next-chunk/<item_id>', methods=['GET'])
+def process_next_chunk(item_id):
+    """Process the next chunk for a document."""
+    try:
+        # Get the document
+        doc_ref = db.collection("knowledge_items").document(item_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            return jsonify({"error": "Document not found"}), 404
+            
+        doc_data = doc.to_dict()
+        
+        # Check if processing is already done
+        if doc_data.get("processing_status") == "completed":
+            return jsonify({
+                "status": "completed",
+                "message": "Document processing already completed"
             })
-        return {"status": "error", "message": str(e)}
-    
-    
+        
+        # Get current progress
+        processed_chunks = doc_data.get("processed_chunks", 0)
+        total_chunks = doc_data.get("total_chunks")
+        
+        if total_chunks is None:
+            # First time - calculate total chunks
+            content = doc_data.get("content", "")
+            chunks = chunk_text(content, chunk_size=400, overlap=50)
+            total_chunks = len(chunks)
+            
+            # Update document
+            doc_ref.update({
+                "processing_status": "processing",
+                "total_chunks": total_chunks,
+                "processed_chunks": 0
+            })
+            
+            processed_chunks = 0
+        
+        # Check if there are more chunks to process
+        if processed_chunks >= total_chunks:
+            # Mark as completed
+            doc_ref.update({
+                "processing_status": "completed",
+                "embedding_status": "completed",
+                "completed_at": firestore.SERVER_TIMESTAMP
+            })
+            
+            return jsonify({
+                "status": "completed",
+                "message": "Document processing completed"
+            })
+        
+        # Process the next chunk
+        return process_one_chunk(item_id, processed_chunks)
+        
+    except Exception as e:
+        logger.error(f"Error processing next chunk for document {item_id}: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/document-status/<item_id>', methods=['GET'])
 def document_status(item_id):
     """Check the processing status of a document."""
