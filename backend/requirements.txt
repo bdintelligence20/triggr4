@@ -1,0 +1,9 @@
+Flask
+firebase-admin
+pinecone-client
+twilio
+google-cloud-storage
+openai
+anthropic
+PyPDF2
+docx2txt
