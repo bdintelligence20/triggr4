@@ -7,6 +7,7 @@ from embedding_utils import EmbeddingService, chunk_text
 from pinecone_client import PineconeClient
 
 
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

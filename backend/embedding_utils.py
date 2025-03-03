@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize tokenizer and model settings
 TOKENIZER = tiktoken.get_encoding("cl100k_base")  # Used for text splitting
-EMBEDDING_MODEL = "text-embedding-3-small"  # OpenAI's embedding model
+EMBEDDING_MODEL = "text-embedding-3-large"  # OpenAI's embedding model
 MAX_TOKENS = 1500  # Max tokens per chunk
 OVERLAP_TOKENS = 100  # Token overlap between chunks
 
