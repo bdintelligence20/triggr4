@@ -207,13 +207,16 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]
     return chunks
 
 @lru_cache(maxsize=128)
-def get_embedding_cached(text: str) -> List[float]:
+def get_embedding_cached(text: str) -> list:
     """Get embedding for a single text with caching."""
-    response = openai.Embedding.create(input=[text], model="text-embedding-ada-002")
-    return response['data'][0]['embedding']
+    response = client.embeddings.create(
+        model="text-embedding-ada-002",
+        input=[text]
+    )
+    return response.data[0].embedding
 
-async def get_embeddings_async(chunks: List[str]) -> List[List[float]]:
-    """Get embeddings for multiple chunks asynchronously."""
+def get_embeddings(chunks: list) -> list:
+    """Get embeddings for multiple text chunks."""
     embeddings = []
     
     # Process in batches to avoid rate limits
@@ -221,11 +224,12 @@ async def get_embeddings_async(chunks: List[str]) -> List[List[float]]:
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i:i+batch_size]
         try:
-            response = openai.Embedding.create(input=batch, model="text-embedding-ada-002")
-            batch_embeddings = [data['embedding'] for data in response['data']]
+            response = client.embeddings.create(
+                model="text-embedding-ada-002",
+                input=batch
+            )
+            batch_embeddings = [data.embedding for data in response.data]
             embeddings.extend(batch_embeddings)
-            # Small delay to avoid rate limits
-            await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Error getting embeddings batch {i}-{i+batch_size}: {str(e)}")
             raise
