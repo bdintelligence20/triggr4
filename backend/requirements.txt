@@ -16,6 +16,7 @@ twilio
 google-cloud-storage
 openai
 anthropic
+twilio
 
 # File Processing
 PyPDF2

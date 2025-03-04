@@ -8,6 +8,8 @@ from werkzeug.utils import secure_filename
 from flask_cors import CORS
 import traceback
 from openai import OpenAI
+from twilio.rest import Client
+from twilio.twiml.messaging_response import MessagingResponse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -28,6 +30,11 @@ PINECONE_INDEX_NAME = "knowledge-hub-vectors"
 firebase_cred_b64 = os.environ.get("FIREBASE_CRED_B64")
 gcs_cred_b64 = os.environ.get("GCS_CRED_B64")
 GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "knowledge-hub-files")
+
+# Twilio Credentials
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
+TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "+14155238886") 
 
 # Validate required environment variables
 if not (OPENAI_API_KEY and ANTHROPIC_API_KEY and PINECONE_API_KEY and 
@@ -71,6 +78,15 @@ except Exception as e:
 from google.cloud import storage
 gcs_client = storage.Client.from_service_account_info(gcs_cred_info)
 bucket = gcs_client.bucket(GCS_BUCKET_NAME)
+
+# Initialize Twilio client
+try:
+    twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    logger.info("Twilio client initialized")
+except Exception as e:
+    logger.error(f"Twilio initialization error: {str(e)}")
+    twilio_client = None
+
 
 # Import text extraction and processing utilities
 import PyPDF2
@@ -457,6 +473,86 @@ def delete_document(item_id):
     except Exception as e:
         logger.error(f"Delete error: {str(e)}")
         return jsonify({"error": f"Failed to delete document: {str(e)}"}), 500
+
+@app.route('/whatsapp-webhook', methods=['POST'])
+def whatsapp_webhook():
+    """Handle incoming WhatsApp messages."""
+    try:
+        # Create TwiML response
+        resp = MessagingResponse()
+        
+        # Get the incoming message
+        incoming_msg = request.values.get('Body', '').strip()
+        from_number = request.values.get('From', '')
+        
+        logger.info(f"WhatsApp message received from {from_number}: {incoming_msg}")
+        
+        # Skip empty messages
+        if not incoming_msg:
+            resp.message("I couldn't understand your message. Please try again.")
+            return str(resp)
+        
+        # Log the conversation in Firestore
+        conversation_ref = db.collection("whatsapp_conversations").add({
+            "from": from_number,
+            "message": incoming_msg,
+            "timestamp": firestore.SERVER_TIMESTAMP,
+            "status": "received"
+        })
+        
+        try:
+            # Process the message with the RAG system
+            result = rag_system.query(
+                incoming_msg, 
+                namespace="global_knowledge_base",
+                top_k=5
+            )
+            
+            # Get the response
+            ai_response = result.get("answer", "I'm sorry, I couldn't find an answer to your question.")
+            
+            # Update the conversation with the response
+            db.collection("whatsapp_conversations").add({
+                "from": "system",
+                "to": from_number,
+                "message": ai_response,
+                "timestamp": firestore.SERVER_TIMESTAMP,
+                "status": "sent",
+                "in_response_to": conversation_ref.id
+            })
+            
+            # Check if response is too long for WhatsApp
+            if len(ai_response) > 1600:
+                # Split into multiple messages
+                logger.info(f"Response too long ({len(ai_response)} chars), splitting into multiple messages")
+                first_part = ai_response[:1500] + "... (continued)"
+                second_part = "(continued) " + ai_response[1500:]
+                
+                # Send first part via TwiML
+                resp.message(first_part)
+                
+                # Send second part directly via Twilio API
+                if twilio_client:
+                    twilio_client.messages.create(
+                        body=second_part,
+                        from_=f"whatsapp:{TWILIO_WHATSAPP_FROM}",
+                        to=from_number
+                    )
+            else:
+                resp.message(ai_response)
+                
+        except Exception as e:
+            logger.error(f"Error processing WhatsApp message: {str(e)}")
+            resp.message("I'm sorry, I encountered an error processing your request. Please try again later.")
+            
+        logger.info(f"Responding to WhatsApp message with {len(resp.to_xml())} characters")
+        return str(resp)
+        
+    except Exception as e:
+        logger.error(f"WhatsApp webhook error: {str(e)}")
+        resp = MessagingResponse()
+        resp.message("An error occurred. Please try again later.")
+        return str(resp)
 
 @app.route('/test-pinecone', methods=['GET'])
 def test_pinecone():
