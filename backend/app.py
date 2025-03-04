@@ -377,7 +377,6 @@ def query():
             query_text, 
             namespace="global_knowledge_base",
             top_k=5,
-            category=category
         )
         
         # Return response with sources
