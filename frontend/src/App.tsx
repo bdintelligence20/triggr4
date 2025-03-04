@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Book, MessageSquare, Send, Upload, Plus, Trash2, FileText, File as FilePdf, FileIcon, Smartphone, Navigation, Search, X, Menu, ChevronDown, ChevronRight, AlertCircle } from 'lucide-react';
 import * as pdfjs from 'pdfjs-dist';
 import * as mammoth from 'mammoth';
+import ReactMarkdown from 'react-markdown';
 
 // Set worker path for PDF.js
 pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
