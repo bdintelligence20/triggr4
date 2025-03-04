@@ -116,7 +116,7 @@ class RAGSystem:
             }
             
     def generate_response(self, context, query):
-        """Generate a response using Claude based on retrieved context."""
+        """Generate a well-structured response using Claude based on retrieved context."""
         prompt = f"""
         You are a helpful AI assistant tasked with answering questions based on provided context.
         
@@ -127,7 +127,16 @@ class RAGSystem:
         {query}
         
         Answer the question based only on the provided context. If the context doesn't contain relevant information, say so.
-        Be concise but thorough in your answer.
+        
+        Structure your response using proper formatting:
+        1. Begin with a clear heading (using markdown ## ) that summarizes the answer
+        2. Use bullet points (• or - ) for listing items or features
+        3. Use numbered lists (1. 2. 3.) for sequential steps or prioritized points
+        4. Use bold text (**text**) for emphasis on important terms or concepts
+        5. Use subheadings (using markdown ### ) to organize different parts of your answer
+        6. Include a brief summary at the end if the answer is lengthy
+        
+        Make sure your answer is well-organized, concise, and easy to read while being thorough and accurate.
         """
         
         max_retries = 3
