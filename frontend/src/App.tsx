@@ -923,9 +923,13 @@ function App() {
                                   : 'mr-auto bg-white'
                               }`}
                             >
-                              <p>{message.content}</p>
+                              {message.sender === 'ai' ? (
+                                <ReactMarkdown>{message.content}</ReactMarkdown>
+                              ) : (
+                                <p>{message.content}</p>
+                              )}
                               <p className="text-right text-xs text-gray-500 mt-1">
-                                {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                {message.timestamp.toLocaleDateString([], { hour: '2-digit', minute: '2-digit' })}
                               </p>
                             </div>
                           ))}
