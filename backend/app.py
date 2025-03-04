@@ -492,21 +492,16 @@ def whatsapp_webhook():
             resp.message("I couldn't understand your message. Please try again.")
             return str(resp)
         
-        # Log the conversation in Firestore
-        conversation_doc = db.collection("whatsapp_conversations").add({
+        # Create a unique ID for this conversation
+        conversation_id = str(uuid.uuid4())
+        
+        # Log the conversation in Firestore with explicit document ID
+        db.collection("whatsapp_conversations").document(conversation_id).set({
             "from": from_number,
             "message": incoming_msg,
             "timestamp": firestore.SERVER_TIMESTAMP,
             "status": "received"
         })
-        
-        # The 'add' method returns a tuple of (ref, timestamp) in some versions
-        # Let's safely extract the ID
-        conversation_id = None
-        if isinstance(conversation_doc, tuple) and len(conversation_doc) > 0:
-            conversation_id = conversation_doc[0].id
-        elif hasattr(conversation_doc, 'id'):
-            conversation_id = conversation_doc.id
         
         try:
             # Process the message with the RAG system
@@ -519,41 +514,25 @@ def whatsapp_webhook():
             # Get the response
             ai_response = result.get("answer", "I'm sorry, I couldn't find an answer to your question.")
             
-            # Update the conversation with the response
-            db.collection("whatsapp_conversations").add({
+            # Add the response as a separate document
+            db.collection("whatsapp_conversations").document(f"{conversation_id}_response").set({
                 "from": "system",
                 "to": from_number,
                 "message": ai_response,
                 "timestamp": firestore.SERVER_TIMESTAMP,
                 "status": "sent",
-                "in_response_to": conversation_id  # Use the safely extracted ID
+                "in_response_to": conversation_id
             })
             
-            # Check if response is too long for WhatsApp
-            if len(ai_response) > 1600:
-                # Split into multiple messages
-                logger.info(f"Response too long ({len(ai_response)} chars), splitting into multiple messages")
-                first_part = ai_response[:1500] + "... (continued)"
-                second_part = "(continued) " + ai_response[1500:]
-                
-                # Send first part via TwiML
-                resp.message(first_part)
-                
-                # Send second part directly via Twilio API
-                if twilio_client:
-                    twilio_client.messages.create(
-                        body=second_part,
-                        from_=f"whatsapp:{TWILIO_WHATSAPP_FROM}",
-                        to=from_number
-                    )
-            else:
-                resp.message(ai_response)
-                
+            # Send the response
+            resp.message(ai_response)
+            
+            logger.info(f"Responding to WhatsApp with message of length {len(ai_response)}")
+            
         except Exception as e:
             logger.error(f"Error processing WhatsApp message: {str(e)}")
             resp.message("I'm sorry, I encountered an error processing your request. Please try again later.")
             
-        logger.info(f"Responding to WhatsApp message with {len(str(resp))} characters")
         return str(resp)
         
     except Exception as e:
