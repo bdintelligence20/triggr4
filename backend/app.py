@@ -493,12 +493,20 @@ def whatsapp_webhook():
             return str(resp)
         
         # Log the conversation in Firestore
-        conversation_ref = db.collection("whatsapp_conversations").add({
+        conversation_doc = db.collection("whatsapp_conversations").add({
             "from": from_number,
             "message": incoming_msg,
             "timestamp": firestore.SERVER_TIMESTAMP,
             "status": "received"
         })
+        
+        # The 'add' method returns a tuple of (ref, timestamp) in some versions
+        # Let's safely extract the ID
+        conversation_id = None
+        if isinstance(conversation_doc, tuple) and len(conversation_doc) > 0:
+            conversation_id = conversation_doc[0].id
+        elif hasattr(conversation_doc, 'id'):
+            conversation_id = conversation_doc.id
         
         try:
             # Process the message with the RAG system
@@ -518,7 +526,7 @@ def whatsapp_webhook():
                 "message": ai_response,
                 "timestamp": firestore.SERVER_TIMESTAMP,
                 "status": "sent",
-                "in_response_to": conversation_ref.id
+                "in_response_to": conversation_id  # Use the safely extracted ID
             })
             
             # Check if response is too long for WhatsApp
@@ -545,7 +553,7 @@ def whatsapp_webhook():
             logger.error(f"Error processing WhatsApp message: {str(e)}")
             resp.message("I'm sorry, I encountered an error processing your request. Please try again later.")
             
-        logger.info(f"Responding to WhatsApp message with {len(resp.to_xml())} characters")
+        logger.info(f"Responding to WhatsApp message with {len(str(resp))} characters")
         return str(resp)
         
     except Exception as e:
