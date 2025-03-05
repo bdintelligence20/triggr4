@@ -388,51 +388,62 @@ def query():
                 "sources": result["sources"],
                 "streaming": False
             })
-        elif stream_enabled:
-    # Set up streaming response using the RAG system
-            def generate():
-                # Create a callback that properly formats chunks for SSE
-                chunks_sent = []
+        else:
+            # Implement a custom streaming solution
+            # This approach directly returns the chunks without relying on SSE
+            def generate_direct_streaming_response():
+                accumulated_response = ""
                 
                 def stream_callback(chunk):
-                    if chunk:
-                        chunks_sent.append(True)
-                        # Format as proper SSE data
-                        yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-                
+                    nonlocal accumulated_response
+                    accumulated_response += chunk
+                    
                 try:
-                    # Process query with streaming using RAG system
-                    result = rag_system.query(
-                        query_text, 
+                    # Get query embedding and search for relevant documents
+                    query_embedding = embedding_service.get_embedding(query_text)
+                    matched_docs = pinecone_client.query_vectors(
+                        query_embedding, 
                         namespace="global_knowledge_base",
-                        top_k=5,
-                        stream_callback=stream_callback
+                        top_k=5  
                     )
                     
-                    # If no chunks were sent, send an empty one to ensure the stream starts
-                    if not chunks_sent:
-                        yield f"data: {json.dumps({'chunk': ''})}\n\n"
+                    if not matched_docs:
+                        return jsonify({
+                            "response": "I couldn't find any relevant information in our knowledge base.",
+                            "sources": [],
+                            "streaming": False
+                        })
                     
-                    # Send sources at the end
-                    yield f"data: {json.dumps({'sources': result['sources']})}\n\n"
+                    # Prepare context from matched documents
+                    context_text = "\n\n---\n\n".join([doc['text'] for doc in matched_docs])
                     
-                    # Signal completion
-                    yield f"data: {json.dumps({'done': True})}\n\n"
+                    # Generate full response
+                    rag_system.generate_response(context_text, query_text, stream_callback)
+                    
+                    # Prepare source information
+                    sources = []
+                    for i, doc in enumerate(matched_docs, start=1):
+                        sources.append({
+                            "id": doc.get('source_id', 'unknown'),
+                            "relevance_score": doc.get('score', 0)
+                        })
+                    
+                    # Return the complete response
+                    return jsonify({
+                        "response": accumulated_response,
+                        "sources": sources,
+                        "streaming": False
+                    })
                     
                 except Exception as e:
-                    logger.error(f"Streaming error: {str(e)}")
-                    # Send error message if something goes wrong
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
-                    yield f"data: {json.dumps({'done': True})}\n\n"
+                    logger.error(f"Error in streaming response: {str(e)}", exc_info=True)
+                    return jsonify({
+                        "error": f"Failed to process query: {str(e)}",
+                        "streaming": False
+                    }), 500
             
-            # Return response with proper headers
-            response = Response(generate(), mimetype="text/event-stream")
-            response.headers['Cache-Control'] = 'no-cache'
-            response.headers['Connection'] = 'keep-alive'
-            response.headers['X-Accel-Buffering'] = 'no'  # Important for NGINX
-            response.headers['Access-Control-Allow-Origin'] = '*'  # Add CORS headers
-            return response
-        
+            return generate_direct_streaming_response()
+    
     except Exception as e:
         logger.error(f"Query error: {str(e)}")
         traceback.print_exc()

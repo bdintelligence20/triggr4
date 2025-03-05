@@ -136,52 +136,70 @@ class RAGSystem:
                 "sources": sources
             }
             
-    def generate_response(self, context, query):
-        """Generate a well-structured response using Claude based on retrieved context."""
+    def generate_response(self, context, query, callback: Callable[[str], None]):
+        """
+        Generate a non-streaming response using Claude based on retrieved context,
+        but call the callback function with chunks as they're processed.
+        
+        Args:
+            context: The context information
+            query: The user's question
+            callback: Function that accepts each chunk of text as it's received
+        """
         prompt = f"""
-        You are a helpful AI assistant tasked with answering questions based on provided context.
+        You are a helpful, knowledgeable AI assistant tasked with answering questions based on provided context information.
         
-        Context:
+        Context information:
+        ```
         {context}
+        ```
         
-        User Question:
-        {query}
+        User Question: {query}
         
-        Answer the question based only on the provided context. If the context doesn't contain relevant information, say so.
+        Guidelines:
+        1. Answer the question based ONLY on the provided context information.
+        2. If the context doesn't contain relevant information, clearly state this.
+        3. Be precise, clear, and factual.
+        4. Structure your response with clear section breaks - use double newlines between paragraphs and sections.
+        5. Start with a brief summary of the answer.
+        6. Use clear headings (## Heading) for different sections.
+        7. When listing steps or items, put each on a new line with proper numbering or bullet points.
+        8. Use clear formatting to make your response easy to read in small chunks.
+        9. Make sure each paragraph or section can stand alone and make sense if read separately.
+        10. If discussing policies or procedures, clearly separate different aspects.
         
-        Structure your response using proper formatting:
-        1. Begin with a clear heading (using markdown ## ) that summarizes the answer
-        2. Use bullet points (• or - ) for listing items or features
-        3. Use numbered lists (1. 2. 3.) for sequential steps or prioritized points
-        4. Use bold text (**text**) for emphasis on important terms or concepts
-        5. Use subheadings (using markdown ### ) to organize different parts of your answer
-        6. Include a brief summary at the end if the answer is lengthy
-        
-        Make sure your answer is well-organized, concise, and easy to read while being thorough and accurate.
+        Format your response with clear section breaks to make it easy to read in chunks.
         """
         
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response = self.anthropic_client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
-                    max_tokens=8000,
-                    temperature=1,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ]
-                )
-                return response.content[0].text
+        try:
+            response = self.anthropic_client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=8000,
+                temperature=1,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+            
+            # Get the complete text
+            full_text = response.content[0].text
+            
+            # Simulate streaming by splitting the text into chunks and sending them
+            # through the callback function with small delays
+            chunk_size = 10  # Characters per chunk
+            for i in range(0, len(full_text), chunk_size):
+                chunk = full_text[i:i+chunk_size]
+                callback(chunk)
+                time.sleep(0.01)  # Small delay to simulate streaming
                 
-            except Exception as e:
-                logger.error(f"Error from Claude API (attempt {attempt+1}): {str(e)}")
-                if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)  # Exponential backoff
-                else:
-                    raise
+            return full_text
+        except Exception as e:
+            logger.error(f"Error generating response: {str(e)}")
+            callback("\n\nI'm sorry, I encountered an error while generating a response. Please try again.")
+            raise
                     
     def generate_streaming_response(self, context, query, callback: Callable[[str], None]):
         """

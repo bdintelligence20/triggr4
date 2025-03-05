@@ -258,12 +258,6 @@ function App() {
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !chatCategory) return;
     
-    // Close any existing EventSource
-    if (activeEventSource) {
-      activeEventSource.close();
-      setActiveEventSource(null);
-    }
-    
     // Add user message
     const userMessageId = Date.now();
     const userMessage: ChatMessage = {
@@ -294,12 +288,7 @@ function App() {
       // Convert category ID to name for API call
       const categoryName = categories.find(c => c.id === chatCategory)?.name || '';
       
-      // Create the URL with query parameters for the POST request
-      const queryParams = new URLSearchParams({
-        stream: 'true'
-      }).toString();
-      
-      // Make the actual POST request with the query
+      // Use a simple POST request instead of streaming
       const response = await fetch(`${API_URL}/query`, {
         method: 'POST',
         headers: {
@@ -308,99 +297,33 @@ function App() {
         body: JSON.stringify({
           query: newMessage,
           category: categoryName === 'All Items' ? '' : categoryName.toLowerCase(),
-          stream: true
-        })
+          stream: true  // We're still using stream mode on the backend
+        }),
       });
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`Failed to get response: ${response.status}`);
       }
       
-      // Check if the response is a streaming response
-      if (response.headers.get('content-type')?.includes('text/event-stream')) {
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('Response body reader could not be created');
-        
-        let accumulatedText = "";
-        let sources = [];
-        
-        // Start reading the stream
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          // Convert the chunk to text
-          const chunk = new TextDecoder().decode(value);
-          const lines = chunk.split('\n\n');
-          
-          for (const line of lines) {
-            if (!line.trim() || !line.startsWith('data: ')) continue;
-            
-            try {
-              // Extract the JSON data
-              const jsonData = line.replace('data: ', '');
-              const data = JSON.parse(jsonData);
-              
-              if (data.chunk) {
-                accumulatedText += data.chunk;
-                
-                // Update AI message with new chunk
-                setChatMessages(prev => 
-                  prev.map(msg => 
-                    msg.id === aiMessageId 
-                      ? { ...msg, content: accumulatedText }
-                      : msg
-                  )
-                );
-              }
-              
-              if (data.sources) {
-                // Save sources
-                sources = data.sources;
-                
-                // Add sources to the message
-                setChatMessages(prev => 
-                  prev.map(msg => 
-                    msg.id === aiMessageId 
-                      ? { ...msg, sources: data.sources }
-                      : msg
-                  )
-                );
-              }
-              
-              if (data.done) {
-                // Stream is complete
-                setChatMessages(prev => 
-                  prev.map(msg => 
-                    msg.id === aiMessageId 
-                      ? { ...msg, isStreaming: false }
-                      : msg
-                  )
-                );
-                break;
-              }
-            } catch (err) {
-              console.error('Error parsing event data:', err, line);
-            }
-          }
-        }
-      } else {
-        // Handle non-streaming response as fallback
-        const result = await response.json();
-        
-        setChatMessages(prev => 
-          prev.map(msg => 
-            msg.id === aiMessageId 
-              ? { 
-                  ...msg, 
-                  content: result.response || "I couldn't find an answer to your question.",
-                  sources: result.sources,
-                  isStreaming: false
-                }
-              : msg
-          )
-        );
+      const result = await response.json();
+      
+      if (result.error) {
+        throw new Error(result.error);
       }
+      
+      // Update AI message with complete response
+      setChatMessages(prev => 
+        prev.map(msg => 
+          msg.id === aiMessageId 
+            ? { 
+                ...msg, 
+                content: result.response || "I couldn't find an answer to your question.",
+                sources: result.sources,
+                isStreaming: false
+              }
+            : msg
+        )
+      );
     } catch (err) {
       console.error('Error getting AI response:', err);
       
