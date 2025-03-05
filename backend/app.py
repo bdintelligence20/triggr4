@@ -3,7 +3,7 @@ import uuid
 import json
 import base64
 import logging
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
 import traceback
@@ -500,11 +500,8 @@ def delete_document(item_id):
 
 @app.route('/whatsapp-webhook', methods=['POST'])
 def whatsapp_webhook():
-    """Handle incoming WhatsApp messages with streaming response support."""
+    """Handle incoming WhatsApp messages with progressive response updates."""
     try:
-        # Create TwiML response
-        resp = MessagingResponse()
-        
         # Get the incoming message
         incoming_msg = request.values.get('Body', '').strip()
         from_number = request.values.get('From', '')
@@ -513,13 +510,12 @@ def whatsapp_webhook():
         
         # Skip empty messages
         if not incoming_msg:
-            resp.message("I couldn't understand your message. Please try again.")
-            return str(resp)
+            return create_twilio_response("I couldn't understand your message. Please try again.")
         
         # Create a unique ID for this conversation
         conversation_id = str(uuid.uuid4())
         
-        # Log the conversation in Firestore with explicit document ID
+        # Log the conversation in Firestore
         db.collection("whatsapp_conversations").document(conversation_id).set({
             "from": from_number,
             "message": incoming_msg,
@@ -527,65 +523,134 @@ def whatsapp_webhook():
             "status": "received"
         })
         
+        # Send initial acknowledgment message
+        send_whatsapp_message(from_number, "⏳ I'm searching through our knowledge base...")
+        
         try:
-            # For WhatsApp, we'll collect the streamed chunks and then send the final message
-            accumulated_response = []
-            
-            def stream_callback(chunk):
-                accumulated_response.append(chunk)
-                
-                # Update the response document with partial response
-                # (good for monitoring but not actually sent to user yet)
-                if len(accumulated_response) % 5 == 0:  # Update every 5 chunks to avoid too many writes
-                    partial_text = "".join(accumulated_response)
-                    db.collection("whatsapp_conversations").document(f"{conversation_id}_response").set({
-                        "from": "system",
-                        "to": from_number,
-                        "message": partial_text,
-                        "timestamp": firestore.SERVER_TIMESTAMP,
-                        "status": "generating",
-                        "in_response_to": conversation_id
-                    })
-            
-            # Process the message with the RAG system using streaming
-            result = rag_system.query(
-                incoming_msg, 
+            # Get query embedding and search for relevant documents
+            query_embedding = embedding_service.get_embedding(incoming_msg)
+            matched_docs = pinecone_client.query_vectors(
+                query_embedding, 
                 namespace="global_knowledge_base",
                 top_k=5,
-                stream_callback=stream_callback
+                filter_dict=None
             )
             
-            # Get the complete response
-            ai_response = "".join(accumulated_response)
-            if not ai_response:
-                ai_response = "I'm sorry, I couldn't find an answer to your question."
+            if not matched_docs:
+                logger.info("No relevant documents found for WhatsApp query")
+                return send_whatsapp_message(
+                    from_number, 
+                    "📚 I couldn't find any relevant information in our knowledge base. Please try asking a different question."
+                )
             
-            # Add the final response as a separate document
+            # Prepare context from matched documents
+            context_text = "\n\n---\n\n".join([doc['text'] for doc in matched_docs])
+            
+            # Send a progress message
+            send_whatsapp_message(from_number, "🔍 Found relevant information! Preparing your answer...")
+            
+            # Track the response generation progress
+            accumulated_text = []
+            current_section = []
+            section_count = 0
+            
+            def stream_callback(chunk):
+                nonlocal accumulated_text, current_section, section_count
+                
+                accumulated_text.append(chunk)
+                current_section.append(chunk)
+                
+                # Check if we have a natural break point (paragraph or section)
+                if '\n\n' in chunk or '##' in chunk:
+                    section_text = ''.join(current_section)
+                    
+                    # Only send substantial sections (more than 100 characters)
+                    if len(section_text.strip()) > 100:
+                        section_count += 1
+                        
+                        # Add proper emoji for different sections
+                        prefix = "🔹"
+                        if section_count == 1:
+                            prefix = "📋"  # First section/summary
+                        elif "example" in section_text.lower():
+                            prefix = "💡"  # Examples
+                        elif any(word in section_text.lower() for word in ["step", "procedure", "process"]):
+                            prefix = "📝"  # Steps/procedures
+                        
+                        # Send the section as a progressive update
+                        send_whatsapp_message(from_number, f"{prefix} {section_text.strip()}")
+                        
+                        # Reset current section
+                        current_section = []
+            
+            # Generate response with streaming
+            rag_system.generate_streaming_response(context_text, incoming_msg, stream_callback)
+            
+            # Get the full response
+            full_text = ''.join(accumulated_text)
+            
+            # If no sections were sent (no natural breaks), send the complete response
+            if section_count == 0 and full_text:
+                send_whatsapp_message(from_number, f"📋 {full_text}")
+            
+            # Send a completion message
+            send_whatsapp_message(from_number, "✅ That completes my answer. Let me know if you need any clarification!")
+            
+            # Store the complete response in Firestore
             db.collection("whatsapp_conversations").document(f"{conversation_id}_response").set({
                 "from": "system",
                 "to": from_number,
-                "message": ai_response,
+                "message": full_text,
                 "timestamp": firestore.SERVER_TIMESTAMP,
-                "status": "sent",
-                "in_response_to": conversation_id
+                "status": "completed",
+                "in_response_to": conversation_id,
+                "sources": [doc.get('source_id', 'unknown') for doc in matched_docs],
+                "section_count": section_count
             })
             
-            # Send the response
-            resp.message(ai_response)
-            
-            logger.info(f"Responding to WhatsApp with message of length {len(ai_response)}")
+            # Return empty TwiML response as we've already sent the messages
+            return create_twilio_response("")
             
         except Exception as e:
-            logger.error(f"Error processing WhatsApp message: {str(e)}")
-            resp.message("I'm sorry, I encountered an error processing your request. Please try again later.")
-            
-        return str(resp)
+            logger.error(f"Error processing WhatsApp message: {str(e)}", exc_info=True)
+            return send_whatsapp_message(
+                from_number, 
+                "❌ I'm sorry, I encountered an error processing your request. Please try again later."
+            )
         
     except Exception as e:
-        logger.error(f"WhatsApp webhook error: {str(e)}")
-        resp = MessagingResponse()
-        resp.message("An error occurred. Please try again later.")
-        return str(resp)
+        logger.error(f"WhatsApp webhook error: {str(e)}", exc_info=True)
+        return create_twilio_response("An error occurred. Please try again later.")
+
+def create_twilio_response(message):
+    """Create a TwiML response with the given message."""
+    resp = MessagingResponse()
+    if message:
+        resp.message(message)
+    return str(resp)
+
+def send_whatsapp_message(to_number, message_body):
+    """Send a WhatsApp message using Twilio client."""
+    try:
+        # Check if Twilio client is initialized
+        if not twilio_client:
+            logger.error("Twilio client not initialized")
+            return create_twilio_response(message_body)
+        
+        # Send message
+        message = twilio_client.messages.create(
+            body=message_body,
+            from_=f"whatsapp:{TWILIO_WHATSAPP_FROM}",
+            to=to_number
+        )
+        
+        logger.info(f"Sent WhatsApp message, SID: {message.sid}")
+        return create_twilio_response("")  # Empty response as we sent directly
+        
+    except Exception as e:
+        logger.error(f"Error sending WhatsApp message: {str(e)}")
+        # Fall back to TwiML response
+        return create_twilio_response(message_body)
 
 @app.route('/test-pinecone', methods=['GET'])
 def test_pinecone():
