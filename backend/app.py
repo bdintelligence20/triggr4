@@ -388,33 +388,50 @@ def query():
                 "sources": result["sources"],
                 "streaming": False
             })
-        else:
-            # Set up streaming response using the RAG system
+        elif stream_enabled:
+    # Set up streaming response using the RAG system
             def generate():
-                # Send proper SSE headers
-                yield "Content-Type: text/event-stream\n"
-                yield "Cache-Control: no-cache\n"
-                yield "Connection: keep-alive\n\n"
+                # Create a callback that properly formats chunks for SSE
+                chunks_sent = []
                 
-                # Create a callback to forward chunks to client
                 def stream_callback(chunk):
-                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                    if chunk:
+                        chunks_sent.append(True)
+                        # Format as proper SSE data
+                        yield f"data: {json.dumps({'chunk': chunk})}\n\n"
                 
-                # Process query with streaming using RAG system
-                result = rag_system.query(
-                    query_text, 
-                    namespace="global_knowledge_base",
-                    top_k=5,
-                    stream_callback=stream_callback
-                )
-                
-                # Send sources at the end
-                yield f"data: {json.dumps({'sources': result['sources']})}\n\n"
-                
-                # Signal completion
-                yield f"data: {json.dumps({'done': True})}\n\n"
+                try:
+                    # Process query with streaming using RAG system
+                    result = rag_system.query(
+                        query_text, 
+                        namespace="global_knowledge_base",
+                        top_k=5,
+                        stream_callback=stream_callback
+                    )
+                    
+                    # If no chunks were sent, send an empty one to ensure the stream starts
+                    if not chunks_sent:
+                        yield f"data: {json.dumps({'chunk': ''})}\n\n"
+                    
+                    # Send sources at the end
+                    yield f"data: {json.dumps({'sources': result['sources']})}\n\n"
+                    
+                    # Signal completion
+                    yield f"data: {json.dumps({'done': True})}\n\n"
+                    
+                except Exception as e:
+                    logger.error(f"Streaming error: {str(e)}")
+                    # Send error message if something goes wrong
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    yield f"data: {json.dumps({'done': True})}\n\n"
             
-            return Response(generate(), mimetype="text/event-stream")
+            # Return response with proper headers
+            response = Response(generate(), mimetype="text/event-stream")
+            response.headers['Cache-Control'] = 'no-cache'
+            response.headers['Connection'] = 'keep-alive'
+            response.headers['X-Accel-Buffering'] = 'no'  # Important for NGINX
+            response.headers['Access-Control-Allow-Origin'] = '*'  # Add CORS headers
+            return response
         
     except Exception as e:
         logger.error(f"Query error: {str(e)}")

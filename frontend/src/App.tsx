@@ -250,7 +250,11 @@ function App() {
     }
   };
 
-  // Function to handle sending a chat message with streaming support
+  
+
+  // Fix for the handleSendMessage function in App.tsx
+// Replace the existing streaming implementation with this more robust version
+
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !chatCategory) return;
     
@@ -290,119 +294,100 @@ function App() {
       // Convert category ID to name for API call
       const categoryName = categories.find(c => c.id === chatCategory)?.name || '';
       
-      if (window.EventSource) {
-        // Use Server-Sent Events for streaming
-        const eventSourceUrl = new URL(`${API_URL}/query`);
-        const source = new EventSource(eventSourceUrl.toString(), {
-          withCredentials: false
-        });
-        setActiveEventSource(source);
+      // Create the URL with query parameters for the POST request
+      const queryParams = new URLSearchParams({
+        stream: 'true'
+      }).toString();
+      
+      // Make the actual POST request with the query
+      const response = await fetch(`${API_URL}/query`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: newMessage,
+          category: categoryName === 'All Items' ? '' : categoryName.toLowerCase(),
+          stream: true
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      // Check if the response is a streaming response
+      if (response.headers.get('content-type')?.includes('text/event-stream')) {
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('Response body reader could not be created');
         
-        // Set up event handlers for SSE
-        source.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            
-            if (data.chunk) {
-              // Update AI message with new chunk
-              setChatMessages(prev => 
-                prev.map(msg => 
-                  msg.id === aiMessageId 
-                    ? { ...msg, content: msg.content + data.chunk }
-                    : msg
-                )
-              );
-            }
-            
-            if (data.sources) {
-              // Add sources to the message
-              setChatMessages(prev => 
-                prev.map(msg => 
-                  msg.id === aiMessageId 
-                    ? { ...msg, sources: data.sources }
-                    : msg
-                )
-              );
-            }
-            
-            if (data.done) {
-              // Stream is complete
-              source.close();
-              setActiveEventSource(null);
-              
-              // Update message to mark streaming as complete
-              setChatMessages(prev => 
-                prev.map(msg => 
-                  msg.id === aiMessageId 
-                    ? { ...msg, isStreaming: false }
-                    : msg
-                )
-              );
-            }
-          } catch (err) {
-            console.error('Error parsing event data:', err, event.data);
-          }
-        };
+        let accumulatedText = "";
+        let sources = [];
         
-        source.onerror = (error) => {
-          console.error('EventSource error:', error);
-          source.close();
-          setActiveEventSource(null);
+        // Start reading the stream
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
           
-          // Update message to indicate error
-          setChatMessages(prev => 
-            prev.map(msg => 
-              msg.id === aiMessageId 
-                ? { 
-                    ...msg, 
-                    content: msg.content || "Sorry, I encountered an error while processing your request.",
-                    isStreaming: false
-                  }
-                : msg
-            )
-          );
-        };
-        
-        // Post the query to initiate streaming
-        fetch(`${API_URL}/query`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            query: newMessage,
-            category: categoryName === 'All Items' ? '' : categoryName.toLowerCase(),
-            stream: true  // Enable streaming
-          })
-        }).catch(err => {
-          console.error('Error sending streaming query:', err);
-          if (source) {
-            source.close();
-            setActiveEventSource(null);
+          // Convert the chunk to text
+          const chunk = new TextDecoder().decode(value);
+          const lines = chunk.split('\n\n');
+          
+          for (const line of lines) {
+            if (!line.trim() || !line.startsWith('data: ')) continue;
+            
+            try {
+              // Extract the JSON data
+              const jsonData = line.replace('data: ', '');
+              const data = JSON.parse(jsonData);
+              
+              if (data.chunk) {
+                accumulatedText += data.chunk;
+                
+                // Update AI message with new chunk
+                setChatMessages(prev => 
+                  prev.map(msg => 
+                    msg.id === aiMessageId 
+                      ? { ...msg, content: accumulatedText }
+                      : msg
+                  )
+                );
+              }
+              
+              if (data.sources) {
+                // Save sources
+                sources = data.sources;
+                
+                // Add sources to the message
+                setChatMessages(prev => 
+                  prev.map(msg => 
+                    msg.id === aiMessageId 
+                      ? { ...msg, sources: data.sources }
+                      : msg
+                  )
+                );
+              }
+              
+              if (data.done) {
+                // Stream is complete
+                setChatMessages(prev => 
+                  prev.map(msg => 
+                    msg.id === aiMessageId 
+                      ? { ...msg, isStreaming: false }
+                      : msg
+                  )
+                );
+                break;
+              }
+            } catch (err) {
+              console.error('Error parsing event data:', err, line);
+            }
           }
-        });
-        
-      } else {
-        // Fallback for browsers not supporting SSE
-        const response = await fetch(`${API_URL}/query`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            query: newMessage,
-            category: categoryName === 'All Items' ? '' : categoryName.toLowerCase(),
-            stream: false  // Disable streaming for fallback
-          }),
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Failed to get response: ${response.status}`);
         }
-        
+      } else {
+        // Handle non-streaming response as fallback
         const result = await response.json();
         
-        // Update AI message with complete response
         setChatMessages(prev => 
           prev.map(msg => 
             msg.id === aiMessageId 

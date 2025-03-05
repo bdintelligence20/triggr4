@@ -186,7 +186,7 @@ class RAGSystem:
     def generate_streaming_response(self, context, query, callback: Callable[[str], None]):
         """
         Generate a response with streaming using Claude based on retrieved context.
-        Optimized for progressive messaging with clear section breaks.
+        Fixed to handle streaming properly and ensure all chunks are sent.
         
         Args:
             context: The context information
@@ -232,13 +232,13 @@ class RAGSystem:
                         }
                     ]
                 ) as stream:
-                    for chunk in stream:
-                        if chunk.type == "content_block_delta" and chunk.delta.text:
-                            callback(chunk.delta.text)
+                    for text_delta in stream.text_deltas:
+                        if text_delta.text:
+                            callback(text_delta.text)
                     
-                # Stream completed successfully
-                return
-                
+                    # Stream completed successfully
+                    return
+                    
             except Exception as e:
                 logger.error(f"Error from Claude API streaming (attempt {attempt+1}): {str(e)}")
                 if attempt < max_retries - 1:
