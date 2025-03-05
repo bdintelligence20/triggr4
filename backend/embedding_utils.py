@@ -92,16 +92,17 @@ def chunk_text(text, max_tokens=MAX_TOKENS, overlap_tokens=OVERLAP_TOKENS):
         chunk_end = min(i + max_tokens, len(tokens))
         chunk = tokens[i:chunk_end]
         
-        # If not at the end and chunk is long enough, find a good break point
+        # If not at the end and chunk is long enough, find a better break point
         if chunk_end < len(tokens) and len(chunk) > 200:
             # Try to break at a sentence or paragraph boundary
             text_chunk = TOKENIZER.decode(chunk)
-            for delimiter in ['\n\n', '\n', '.', '!', '?', ';', ':', ' ']:
+            # Look for paragraph breaks first, then sentence boundaries
+            for delimiter in ['\n\n', '\n', '. ', '! ', '? ', '; ']:
                 # Find the last occurrence of the delimiter
                 last_delimiter = text_chunk.rfind(delimiter)
-                if last_delimiter > max(0, len(text_chunk) - 100):  # Ensure we're not breaking too early
+                if last_delimiter > max(0, len(text_chunk) - 100):  # Not too early
                     # Recalculate chunk_end based on this delimiter position
-                    adjusted_text = text_chunk[:last_delimiter + 1]
+                    adjusted_text = text_chunk[:last_delimiter + len(delimiter)]
                     adjusted_tokens = TOKENIZER.encode(adjusted_text)
                     chunk = adjusted_tokens
                     chunk_end = i + len(adjusted_tokens)

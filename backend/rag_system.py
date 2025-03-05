@@ -58,20 +58,7 @@ class RAGSystem:
         return vectors_stored
         
     def query(self, user_query, namespace="global_knowledge_base", top_k=5, category=None, stream_callback=None):
-        """
-        Query the system with a user question and get an AI response.
-        
-        Args:
-            user_query: The user's question
-            namespace: The Pinecone namespace to query
-            top_k: Number of top results to retrieve
-            category: Optional category filter
-            stream_callback: Optional callback function to handle streaming responses
-            
-        Returns:
-            If stream_callback is None: dict containing the full response
-            If stream_callback is provided: dict with empty answer and sources
-        """
+        """Query the system with a user question and get an AI response with more context."""
         logger.info(f"Processing query: '{user_query}'")
         
         # Step 1: Generate embedding for the query
@@ -83,14 +70,18 @@ class RAGSystem:
                 "sources": []
             }
             
-        # Step 2: Query Pinecone with NO category filter to find all relevant matches
-        logger.info(f"Querying with namespace: {namespace}, top_k: {top_k}, with no category filter")
+        # Create filter dict if category is provided
+        filter_dict = None
+        if category:
+            filter_dict = {"category": category}
         
+        # Step 2: Query Pinecone with slightly more results
+        extended_top_k = min(top_k + 3, 10)  # Get a few extra results, but not too many
         matched_docs = self.pinecone_client.query_vectors(
             query_embedding, 
             namespace=namespace,
-            top_k=top_k,
-            filter_dict=None  # Remove category filter to find all matches
+            top_k=extended_top_k,
+            filter_dict=filter_dict
         )
         
         if not matched_docs:
@@ -102,16 +93,23 @@ class RAGSystem:
             
         logger.info(f"Found {len(matched_docs)} relevant documents")
         
-        # Step 3: Prepare context for Claude
-        context_text = "\n\n---\n\n".join([doc['text'] for doc in matched_docs])
+        # Step 3: Prepare context for Claude with improved context formatting
+        # Join chunks with clear section breaks for better context
+        context_chunks = []
+        for i, doc in enumerate(matched_docs[:top_k]):  # Only use top_k for the final answer
+            context_chunks.append(f"Document {i+1}:\n{doc['text']}")
+        
+        context_text = "\n\n---\n\n".join(context_chunks)
         
         # Create source information for citation
         sources = []
-        for i, doc in enumerate(matched_docs, start=1):
+        for i, doc in enumerate(matched_docs[:top_k]):
             sources.append({
                 "id": doc.get('source_id', 'unknown'),
                 "relevance_score": doc.get('score', 0)
             })
+        
+    
             
         try:
             if stream_callback is None:

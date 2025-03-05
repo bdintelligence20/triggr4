@@ -113,7 +113,7 @@ class PineconeClient:
             return total_vectors
     
     def query_vectors(self, query_embedding, namespace="global_knowledge_base", top_k=5, filter_dict=None):
-        """Query Pinecone for the most similar vectors with retry logic."""
+        """Query Pinecone for the most similar vectors with retry logic and better filtering."""
         if not self.index:
             raise ValueError("Pinecone index not initialized")
             
@@ -123,10 +123,13 @@ class PineconeClient:
             try:
                 logger.info(f"Querying Pinecone (attempt {attempt+1}) with namespace: '{namespace}', filter: {filter_dict}")
                 
+                # Increase top_k to get more candidates for relevance filtering
+                fetch_k = min(top_k * 3, 20)  # Get more candidates but cap at 20
+                
                 # Include metadata in results
                 results = self.index.query(
                     vector=query_embedding,
-                    top_k=top_k,
+                    top_k=fetch_k,  # Get more candidates
                     namespace=namespace,
                     include_metadata=True,
                     filter=filter_dict
@@ -145,7 +148,9 @@ class PineconeClient:
                             'score': match.get('score', 0)
                         })
                 
-                return matched_docs
+                # Sort by score and return top_k
+                matched_docs.sort(key=lambda x: x['score'], reverse=True)
+                return matched_docs[:top_k]
                 
             except Exception as e:
                 logger.error(f"Query failed (attempt {attempt+1}): {str(e)}")

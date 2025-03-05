@@ -351,13 +351,15 @@ def upload_document():
             os.remove(local_path)
         return jsonify({"error": f"Failed to process document: {str(e)}"}), 500
 
+# Update the query endpoint in app.py to include status information
+
 @app.route('/query', methods=['POST'])
 def query():
-    """Query the knowledge base using RAG with streaming support."""
+    """Query the knowledge base using RAG with streaming support and status indicators."""
     data = request.get_json()
     query_text = data.get("query")
     category = data.get("category")
-    stream_enabled = data.get("stream", False)  # New parameter to enable streaming
+    stream_enabled = data.get("stream", False)
     
     logger.info(f"Query received: '{query_text}', category: '{category}', stream: {stream_enabled}")
     
@@ -386,11 +388,11 @@ def query():
             return jsonify({
                 "response": result["answer"],
                 "sources": result["sources"],
-                "streaming": False
+                "streaming": False,
+                "status": "completed"
             })
         else:
-            # Implement a custom streaming solution
-            # This approach directly returns the chunks without relying on SSE
+            # Implement a custom streaming solution that includes status
             def generate_direct_streaming_response():
                 accumulated_response = ""
                 
@@ -411,7 +413,8 @@ def query():
                         return jsonify({
                             "response": "I couldn't find any relevant information in our knowledge base.",
                             "sources": [],
-                            "streaming": False
+                            "streaming": False,
+                            "status": "no_results"
                         })
                     
                     # Prepare context from matched documents
@@ -428,18 +431,20 @@ def query():
                             "relevance_score": doc.get('score', 0)
                         })
                     
-                    # Return the complete response
+                    # Return the complete response with status
                     return jsonify({
                         "response": accumulated_response,
                         "sources": sources,
-                        "streaming": False
+                        "streaming": False,
+                        "status": "completed"
                     })
                     
                 except Exception as e:
                     logger.error(f"Error in streaming response: {str(e)}", exc_info=True)
                     return jsonify({
                         "error": f"Failed to process query: {str(e)}",
-                        "streaming": False
+                        "streaming": False,
+                        "status": "error"
                     }), 500
             
             return generate_direct_streaming_response()
@@ -447,7 +452,7 @@ def query():
     except Exception as e:
         logger.error(f"Query error: {str(e)}")
         traceback.print_exc()
-        return jsonify({"error": f"Failed to process query: {str(e)}"}), 500
+        return jsonify({"error": f"Failed to process query: {str(e)}", "status": "error"}), 500
 
 @app.route('/documents', methods=['GET'])
 def list_documents():

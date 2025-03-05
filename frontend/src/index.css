@@ -68,3 +68,56 @@
 .animate-fade-in-out {
   animation: fadeInOut 3s ease-in-out;
 }
+
+@keyframes pulse {
+    0% { opacity: 0.6; }
+    50% { opacity: 1; }
+    100% { opacity: 0.6; }
+  }
+  
+  .acknowledgment-message {
+    background-color: #f0f9ff !important;
+    border-left: 3px solid #38bdf8 !important;
+    animation: pulse 2s infinite;
+  }
+  
+  .acknowledgment-message.completed {
+    background-color: #ecfdf5 !important;
+    border-left: 3px solid #10b981 !important;
+    animation: none;
+  }
+  
+  .acknowledgment-message.error {
+    background-color: #fef2f2 !important;
+    border-left: 3px solid #ef4444 !important;
+    animation: none;
+  }
+  
+  .thinking-dots {
+    display: inline-flex;
+    margin-left: 4px;
+  }
+  
+  .thinking-dots span {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background-color: currentColor;
+    margin: 0 2px;
+    animation: dotPulse 1.5s infinite;
+  }
+  
+  .thinking-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  
+  .thinking-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+  
+  @keyframes dotPulse {
+    0%, 100% { opacity: 0.4; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1); }
+  }
+  
+ 

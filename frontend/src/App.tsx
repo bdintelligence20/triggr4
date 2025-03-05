@@ -255,8 +255,16 @@ function App() {
   // Fix for the handleSendMessage function in App.tsx
 // Replace the existing streaming implementation with this more robust version
 
+  // Modify the handleSendMessage function in App.tsx to include acknowledgment messages
+
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !chatCategory) return;
+    
+    // Close any existing EventSource
+    if (activeEventSource) {
+      activeEventSource.close();
+      setActiveEventSource(null);
+    }
     
     // Add user message
     const userMessageId = Date.now();
@@ -271,24 +279,35 @@ function App() {
     setChatMessages(prev => [...prev, userMessage]);
     setNewMessage('');
     
-    // Create placeholder for AI response
-    const aiMessageId = userMessageId + 1;
-    const aiPlaceholder: ChatMessage = {
-      id: aiMessageId,
-      content: "",
+    // Add initial acknowledgment message (searching)
+    const acknowledgeId = userMessageId + 1;
+    const acknowledgmentMessage: ChatMessage = {
+      id: acknowledgeId,
+      content: "⏳ I'm searching through our knowledge base...",
       sender: 'ai',
       timestamp: new Date(),
       category: chatCategory,
       isStreaming: true
     };
     
-    setChatMessages(prev => [...prev, aiPlaceholder]);
+    setChatMessages(prev => [...prev, acknowledgmentMessage]);
     
     try {
       // Convert category ID to name for API call
       const categoryName = categories.find(c => c.id === chatCategory)?.name || '';
       
-      // Use a simple POST request instead of streaming
+      // First update the acknowledgment to show we're processing
+      setTimeout(() => {
+        setChatMessages(prev => 
+          prev.map(msg => 
+            msg.id === acknowledgeId 
+              ? { ...msg, content: "🔍 Found relevant information! Preparing your answer..." }
+              : msg
+          )
+        );
+      }, 1500);
+
+      // Use a simple POST request
       const response = await fetch(`${API_URL}/query`, {
         method: 'POST',
         headers: {
@@ -311,10 +330,10 @@ function App() {
         throw new Error(result.error);
       }
       
-      // Update AI message with complete response
+      // Replace acknowledgment with actual response
       setChatMessages(prev => 
         prev.map(msg => 
-          msg.id === aiMessageId 
+          msg.id === acknowledgeId 
             ? { 
                 ...msg, 
                 content: result.response || "I couldn't find an answer to your question.",
@@ -324,13 +343,31 @@ function App() {
             : msg
         )
       );
+
+      // Add completion message
+      if (result.response) {
+        setTimeout(() => {
+          const completionMessageId = Date.now();
+          const completionMessage: ChatMessage = {
+            id: completionMessageId,
+            content: "✅ That completes my answer. Let me know if you need any clarification!",
+            sender: 'ai',
+            timestamp: new Date(),
+            category: chatCategory,
+            isStreaming: false
+          };
+          
+          setChatMessages(prev => [...prev, completionMessage]);
+        }, 1000);
+      }
+      
     } catch (err) {
       console.error('Error getting AI response:', err);
       
       // Update error message
       setChatMessages(prev => 
         prev.map(msg => 
-          msg.id === aiMessageId 
+          msg.id === acknowledgeId 
             ? { 
                 ...msg, 
                 content: "Sorry, I encountered an error while processing your request. Please try again later.",
