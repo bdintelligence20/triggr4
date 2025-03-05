@@ -1,3 +1,70 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --color-primary: #10B981;
+  --color-primary-hover: #6EE7B7;
+  --color-secondary: #8B5CF6;
+  --color-tertiary: #3B82F6;
+  --color-alternate: #F59E0B;
+  --color-success: #059669;
+  --color-error: #DC2626;
+  --color-warning: #F59E0B;
+  --color-info: #3B82F6;
+  --color-bg-light: #F9FAFB;
+  --color-bg-dark: #1F2937;
+  --color-text-primary: #111827;
+  --color-text-secondary: #4B5563;
+}
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 dark:bg-gray-800 dark:text-gray-100 transition-colors duration-300;
+  }
+  
+  h1 {
+    @apply text-2xl font-bold;
+  }
+  
+  h2 {
+    @apply text-xl font-semibold;
+  }
+  
+  h3 {
+    @apply text-lg font-medium;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-4 py-2 bg-emerald-400 hover:bg-emerald-300 text-white rounded-lg transition-colors shadow-sm disabled:bg-gray-300 disabled:cursor-not-allowed;
+  }
+  
+  .btn-secondary {
+    @apply px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-100 rounded-lg transition-colors;
+  }
+  
+  .btn-disabled {
+    @apply px-4 py-2 bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-400 rounded-lg cursor-not-allowed;
+  }
+  
+  .input-field {
+    @apply px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-400 dark:focus:ring-emerald-500 transition-colors;
+  }
+  
+  .card {
+    @apply bg-white dark:bg-gray-900 rounded-lg shadow-md p-6 transition-colors duration-300;
+  }
+}
+
+@keyframes fadeInOut {
+  0% { opacity: 0; transform: translateY(-10px); }
+  10% { opacity: 1; transform: translateY(0); }
+  90% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-10px); }
+}
+
+.animate-fade-in-out {
+  animation: fadeInOut 3s ease-in-out;
+}
