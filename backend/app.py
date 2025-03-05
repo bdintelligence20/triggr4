@@ -10,6 +10,10 @@ import traceback
 from openai import OpenAI
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
+import nltk
+
+nltk.download('punkt', quiet=True)
+from nltk.tokenize import sent_tokenize
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -671,38 +675,78 @@ def create_twilio_response(message):
         resp.message(message)
     return str(resp)
 
+def split_message_semantically(message_body, max_length=1600):
+    """
+    Splits a message into semantically coherent chunks using sentence boundaries.
+    If a single sentence is too long, it will further split that sentence at a space.
+    """
+    sentences = sent_tokenize(message_body)
+    chunks = []
+    current_chunk = ""
+    
+    for sentence in sentences:
+        # If adding the sentence exceeds the limit, append the current chunk and start a new one.
+        if len(current_chunk) + len(sentence) + 1 > max_length:
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = sentence
+            else:
+                # If a single sentence is longer than max_length, break it at the last space.
+                while len(sentence) > max_length:
+                    split_point = sentence.rfind(" ", 0, max_length)
+                    if split_point == -1:
+                        split_point = max_length
+                    chunks.append(sentence[:split_point])
+                    sentence = sentence[split_point:].strip()
+                current_chunk = sentence
+        else:
+            # Add the sentence to the current chunk.
+            if current_chunk:
+                current_chunk += " " + sentence
+            else:
+                current_chunk = sentence
+
+    # Append any remaining text as the final chunk.
+    if current_chunk:
+        chunks.append(current_chunk)
+    
+    return chunks
+
 def send_whatsapp_message(to_number, message_body):
-    """Send a WhatsApp message using Twilio client."""
+    """
+    Sends a WhatsApp message using the Twilio client.
+    If the message exceeds 1600 characters, it is split semantically into multiple parts.
+    """
+    max_length = 1600
+    # Ensure the 'to_number' has the correct WhatsApp prefix.
+    if not to_number.startswith('whatsapp:'):
+        to_number = f"whatsapp:{to_number}"
+    
+    # Format the sender number.
+    from_number = TWILIO_WHATSAPP_FROM
+    if not from_number.startswith('whatsapp:'):
+        from_number = f"whatsapp:{from_number}"
+    
     try:
-        # Check if Twilio client is initialized
-        if not twilio_client:
-            logger.error("Twilio client not initialized")
-            return create_twilio_response(message_body)
-        
-        # Make sure the to_number has WhatsApp prefix if it doesn't already
-        if not to_number.startswith('whatsapp:'):
-            to_number = f"whatsapp:{to_number}"
-        
-        # Format the WhatsApp from number correctly - DON'T add prefix if it already has one
-        from_number = TWILIO_WHATSAPP_FROM
-        if not from_number.startswith('whatsapp:'):
-            from_number = f"whatsapp:{from_number}"
-            
-        logger.info(f"Sending WhatsApp from {from_number} to {to_number}")
-            
-        # Send message
-        message = twilio_client.messages.create(
-            body=message_body,
-            from_=from_number,
-            to=to_number
-        )
-        
-        logger.info(f"Sent WhatsApp message, SID: {message.sid}")
-        return create_twilio_response("")  # Empty response as we sent directly
+        # Split the message semantically if it exceeds the max_length.
+        if len(message_body) > max_length:
+            chunks = split_message_semantically(message_body, max_length=max_length)
+            for chunk in chunks:
+                twilio_client.messages.create(
+                    body=chunk,
+                    from_=from_number,
+                    to=to_number
+                )
+        else:
+            twilio_client.messages.create(
+                body=message_body,
+                from_=from_number,
+                to=to_number
+            )
+        return create_twilio_response("")
         
     except Exception as e:
         logger.error(f"Error sending WhatsApp message: {str(e)}")
-        # Fall back to TwiML response
         return create_twilio_response(message_body)
 
 @app.route('/test-pinecone', methods=['GET'])
