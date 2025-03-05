@@ -238,13 +238,13 @@ function App() {
     }
   };
 
-  // Function to handle sending a chat message
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !chatCategory) return;
     
     // Add user message
-    const userMessage: ChatMessage = {
-      id: Date.now(),
+    const userMessageId = Date.now();
+    const userMessage = {
+      id: userMessageId,
       content: newMessage,
       sender: 'user',
       timestamp: new Date(),
@@ -254,53 +254,166 @@ function App() {
     setChatMessages(prev => [...prev, userMessage]);
     setNewMessage('');
     
+    // Create placeholder for AI response
+    const aiMessageId = userMessageId + 1;
+    const aiPlaceholder = {
+      id: aiMessageId,
+      content: "",
+      sender: 'ai',
+      timestamp: new Date(),
+      category: chatCategory,
+      isStreaming: true
+    };
+    
+    setChatMessages(prev => [...prev, aiPlaceholder]);
+    
     try {
       // Convert category ID to name for API call
       const categoryName = categories.find(c => c.id === chatCategory)?.name || '';
       
-      // Call API to get response
-      const response = await fetch(`${API_URL}/query`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query: newMessage,
-          category: categoryName === 'All Items' ? '' : categoryName.toLowerCase()
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to get response: ${response.status}`);
+      if (window.EventSource) {
+        // Use Server-Sent Events for streaming
+        const source = new EventSource(`${API_URL}/query?stream=true`, {
+          withCredentials: false
+        });
+        
+        // Set up event handlers for SSE
+        source.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          
+          if (data.chunk) {
+            // Update AI message with new chunk
+            setChatMessages(prev => 
+              prev.map(msg => 
+                msg.id === aiMessageId 
+                  ? { ...msg, content: msg.content + data.chunk }
+                  : msg
+              )
+            );
+          }
+          
+          if (data.done) {
+            // Stream is complete
+            source.close();
+            
+            // Update message to mark streaming as complete
+            setChatMessages(prev => 
+              prev.map(msg => 
+                msg.id === aiMessageId 
+                  ? { ...msg, isStreaming: false }
+                  : msg
+              )
+            );
+          }
+        };
+        
+        source.onerror = (error) => {
+          console.error('EventSource error:', error);
+          source.close();
+          
+          // Update message to indicate error
+          setChatMessages(prev => 
+            prev.map(msg => 
+              msg.id === aiMessageId 
+                ? { 
+                    ...msg, 
+                    content: msg.content || "Sorry, I encountered an error while processing your request.",
+                    isStreaming: false
+                  }
+                : msg
+            )
+          );
+        };
+        
+        // Post the query to initiate streaming
+        fetch(`${API_URL}/query`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query: newMessage,
+            category: categoryName === 'All Items' ? '' : categoryName.toLowerCase(),
+            stream: true  // Enable streaming
+          })
+        }).catch(err => {
+          console.error('Error sending streaming query:', err);
+          source.close();
+        });
+        
+      } else {
+        // Fallback for browsers not supporting SSE
+        const response = await fetch(`${API_URL}/query`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query: newMessage,
+            category: categoryName === 'All Items' ? '' : categoryName.toLowerCase(),
+            stream: false  // Disable streaming for fallback
+          }),
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Failed to get response: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        // Update AI message with complete response
+        setChatMessages(prev => 
+          prev.map(msg => 
+            msg.id === aiMessageId 
+              ? { 
+                  ...msg, 
+                  content: result.response || "I couldn't find an answer to your question.",
+                  isStreaming: false
+                }
+              : msg
+          )
+        );
       }
-      
-      const result = await response.json();
-      
-      // Add AI response
-      const aiMessage: ChatMessage = {
-        id: Date.now() + 1,
-        content: result.response || "I couldn't find an answer to your question.",
-        sender: 'ai',
-        timestamp: new Date(),
-        category: chatCategory
-      };
-      
-      setChatMessages(prev => [...prev, aiMessage]);
     } catch (err) {
       console.error('Error getting AI response:', err);
       
-      // Add error message
-      const errorMessage: ChatMessage = {
-        id: Date.now() + 1,
-        content: "Sorry, I encountered an error while processing your request. Please try again later.",
-        sender: 'ai',
-        timestamp: new Date(),
-        category: chatCategory
-      };
-      
-      setChatMessages(prev => [...prev, errorMessage]);
+      // Update error message
+      setChatMessages(prev => 
+        prev.map(msg => 
+          msg.id === aiMessageId 
+            ? { 
+                ...msg, 
+                content: "Sorry, I encountered an error while processing your request. Please try again later.",
+                isStreaming: false
+              }
+            : msg
+        )
+      );
     }
   };
+  
+  // Inside the render of the chat message
+  {message.sender === 'ai' ? (
+    <div className={`max-w-3/4 rounded-lg p-3 ${
+      message.sender === 'user' 
+        ? 'bg-emerald-400 dark:bg-emerald-600 text-white' 
+        : 'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white'
+    }`}>
+      {message.isStreaming && (
+        <div className="flex items-center mb-2">
+          <div className="animate-pulse h-2 w-2 mr-1 bg-emerald-400 dark:bg-emerald-500 rounded-full"></div>
+          <div className="animate-pulse h-2 w-2 mr-1 bg-emerald-400 dark:bg-emerald-500 rounded-full" style={{animationDelay: '0.2s'}}></div>
+          <div className="animate-pulse h-2 w-2 bg-emerald-400 dark:bg-emerald-500 rounded-full" style={{animationDelay: '0.4s'}}></div>
+        </div>
+      )}
+      <ReactMarkdown>{message.content}</ReactMarkdown>
+      <p className="text-xs mt-1 opacity-70">
+        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      </p>
+    </div>
+  ) : (
+    <p>{message.content}</p>
+  )}
 
   // Function to handle deleting a knowledge item
   const handleDeleteKnowledgeItem = async (id: string) => {

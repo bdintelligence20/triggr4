@@ -353,12 +353,13 @@ def upload_document():
 
 @app.route('/query', methods=['POST'])
 def query():
-    """Query the knowledge base using RAG."""
+    """Query the knowledge base using RAG with streaming support."""
     data = request.get_json()
     query_text = data.get("query")
     category = data.get("category")
+    stream_enabled = data.get("stream", False)  # New parameter to enable streaming
     
-    logger.info(f"Query received: '{query_text}', category: '{category}'")
+    logger.info(f"Query received: '{query_text}', category: '{category}', stream: {stream_enabled}")
     
     if not query_text or not isinstance(query_text, str) or len(query_text.strip()) < 2:
         return jsonify({"error": "Invalid or empty query"}), 400
@@ -369,21 +370,45 @@ def query():
             "query": query_text,
             "category": category,
             "timestamp": firestore.SERVER_TIMESTAMP,
-            "client_ip": request.remote_addr
+            "client_ip": request.remote_addr,
+            "stream_enabled": stream_enabled
         })
         
-        # Process query with RAG system
-        result = rag_system.query(
-            query_text, 
-            namespace="global_knowledge_base",
-            top_k=5,
-        )
-        
-        # Return response with sources
-        return jsonify({
-            "response": result["answer"],
-            "sources": result["sources"]
-        })
+        if not stream_enabled:
+            # Standard non-streaming response
+            result = rag_system.query(
+                query_text, 
+                namespace="global_knowledge_base",
+                top_k=5,
+            )
+            
+            # Return response with sources
+            return jsonify({
+                "response": result["answer"],
+                "sources": result["sources"],
+                "streaming": False
+            })
+        else:
+            # Set up streaming response
+            def generate():
+                chunks = []
+                
+                def stream_callback(chunk):
+                    chunks.append(chunk)
+                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                
+                # Process query with streaming enabled
+                result = rag_system.query(
+                    query_text, 
+                    namespace="global_knowledge_base",
+                    top_k=5,
+                    stream_callback=stream_callback
+                )
+                
+                # Send sources at the end
+                yield f"data: {json.dumps({'sources': result['sources'], 'done': True})}\n\n"
+            
+            return Response(generate(), mimetype="text/event-stream")
         
     except Exception as e:
         logger.error(f"Query error: {str(e)}")
@@ -475,7 +500,7 @@ def delete_document(item_id):
 
 @app.route('/whatsapp-webhook', methods=['POST'])
 def whatsapp_webhook():
-    """Handle incoming WhatsApp messages."""
+    """Handle incoming WhatsApp messages with streaming response support."""
     try:
         # Create TwiML response
         resp = MessagingResponse()
@@ -503,17 +528,39 @@ def whatsapp_webhook():
         })
         
         try:
-            # Process the message with the RAG system
+            # For WhatsApp, we'll collect the streamed chunks and then send the final message
+            accumulated_response = []
+            
+            def stream_callback(chunk):
+                accumulated_response.append(chunk)
+                
+                # Update the response document with partial response
+                # (good for monitoring but not actually sent to user yet)
+                if len(accumulated_response) % 5 == 0:  # Update every 5 chunks to avoid too many writes
+                    partial_text = "".join(accumulated_response)
+                    db.collection("whatsapp_conversations").document(f"{conversation_id}_response").set({
+                        "from": "system",
+                        "to": from_number,
+                        "message": partial_text,
+                        "timestamp": firestore.SERVER_TIMESTAMP,
+                        "status": "generating",
+                        "in_response_to": conversation_id
+                    })
+            
+            # Process the message with the RAG system using streaming
             result = rag_system.query(
                 incoming_msg, 
                 namespace="global_knowledge_base",
-                top_k=5
+                top_k=5,
+                stream_callback=stream_callback
             )
             
-            # Get the response
-            ai_response = result.get("answer", "I'm sorry, I couldn't find an answer to your question.")
+            # Get the complete response
+            ai_response = "".join(accumulated_response)
+            if not ai_response:
+                ai_response = "I'm sorry, I couldn't find an answer to your question."
             
-            # Add the response as a separate document
+            # Add the final response as a separate document
             db.collection("whatsapp_conversations").document(f"{conversation_id}_response").set({
                 "from": "system",
                 "to": from_number,
