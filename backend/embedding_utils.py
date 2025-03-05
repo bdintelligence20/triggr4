@@ -7,6 +7,7 @@ import tiktoken
 
 # Download NLTK’s Punkt sentence tokenizer if not already present
 nltk.download('punkt', quiet=True)
+nltk.download('punkt_tab', quiet=True)
 from nltk.tokenize import sent_tokenize
 
 # Configure logging
