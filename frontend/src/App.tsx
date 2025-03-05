@@ -38,6 +38,8 @@ interface ChatMessage {
   sender: 'user' | 'ai';
   timestamp: Date;
   category?: string;
+  isStreaming?: boolean; // New property to track streaming status
+  sources?: Array<{id: string, relevance_score: number}>; // New property for sources
 }
 
 function App() {
@@ -52,6 +54,7 @@ function App() {
   const [chatCategory, setChatCategory] = useState('');
   const [newMessage, setNewMessage] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [activeEventSource, setActiveEventSource] = useState<EventSource | null>(null);
   
   // App specific states
   const [notification, setNotification] = useState<string | null>(null);
@@ -106,6 +109,15 @@ function App() {
     
     checkBackendConnection();
   }, []);
+
+  // Clean up EventSource on unmount
+  useEffect(() => {
+    return () => {
+      if (activeEventSource) {
+        activeEventSource.close();
+      }
+    };
+  }, [activeEventSource]);
 
   // Load documents from backend
   useEffect(() => {
@@ -238,12 +250,19 @@ function App() {
     }
   };
 
+  // Function to handle sending a chat message with streaming support
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !chatCategory) return;
     
+    // Close any existing EventSource
+    if (activeEventSource) {
+      activeEventSource.close();
+      setActiveEventSource(null);
+    }
+    
     // Add user message
     const userMessageId = Date.now();
-    const userMessage = {
+    const userMessage: ChatMessage = {
       id: userMessageId,
       content: newMessage,
       sender: 'user',
@@ -256,7 +275,7 @@ function App() {
     
     // Create placeholder for AI response
     const aiMessageId = userMessageId + 1;
-    const aiPlaceholder = {
+    const aiPlaceholder: ChatMessage = {
       id: aiMessageId,
       content: "",
       sender: 'ai',
@@ -273,43 +292,62 @@ function App() {
       
       if (window.EventSource) {
         // Use Server-Sent Events for streaming
-        const source = new EventSource(`${API_URL}/query?stream=true`, {
+        const eventSourceUrl = new URL(`${API_URL}/query`);
+        const source = new EventSource(eventSourceUrl.toString(), {
           withCredentials: false
         });
+        setActiveEventSource(source);
         
         // Set up event handlers for SSE
         source.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          
-          if (data.chunk) {
-            // Update AI message with new chunk
-            setChatMessages(prev => 
-              prev.map(msg => 
-                msg.id === aiMessageId 
-                  ? { ...msg, content: msg.content + data.chunk }
-                  : msg
-              )
-            );
-          }
-          
-          if (data.done) {
-            // Stream is complete
-            source.close();
+          try {
+            const data = JSON.parse(event.data);
             
-            // Update message to mark streaming as complete
-            setChatMessages(prev => 
-              prev.map(msg => 
-                msg.id === aiMessageId 
-                  ? { ...msg, isStreaming: false }
-                  : msg
-              )
-            );
+            if (data.chunk) {
+              // Update AI message with new chunk
+              setChatMessages(prev => 
+                prev.map(msg => 
+                  msg.id === aiMessageId 
+                    ? { ...msg, content: msg.content + data.chunk }
+                    : msg
+                )
+              );
+            }
+            
+            if (data.sources) {
+              // Add sources to the message
+              setChatMessages(prev => 
+                prev.map(msg => 
+                  msg.id === aiMessageId 
+                    ? { ...msg, sources: data.sources }
+                    : msg
+                )
+              );
+            }
+            
+            if (data.done) {
+              // Stream is complete
+              source.close();
+              setActiveEventSource(null);
+              
+              // Update message to mark streaming as complete
+              setChatMessages(prev => 
+                prev.map(msg => 
+                  msg.id === aiMessageId 
+                    ? { ...msg, isStreaming: false }
+                    : msg
+                )
+              );
+            }
+          } catch (err) {
+            console.error('Error parsing event data:', err, event.data);
           }
         };
         
         source.onerror = (error) => {
           console.error('EventSource error:', error);
           source.close();
+          setActiveEventSource(null);
           
           // Update message to indicate error
           setChatMessages(prev => 
@@ -338,7 +376,10 @@ function App() {
           })
         }).catch(err => {
           console.error('Error sending streaming query:', err);
-          source.close();
+          if (source) {
+            source.close();
+            setActiveEventSource(null);
+          }
         });
         
       } else {
@@ -368,6 +409,7 @@ function App() {
               ? { 
                   ...msg, 
                   content: result.response || "I couldn't find an answer to your question.",
+                  sources: result.sources,
                   isStreaming: false
                 }
               : msg
@@ -391,29 +433,6 @@ function App() {
       );
     }
   };
-  
-  // Inside the render of the chat message
-  {message.sender === 'ai' ? (
-    <div className={`max-w-3/4 rounded-lg p-3 ${
-      message.sender === 'user' 
-        ? 'bg-emerald-400 dark:bg-emerald-600 text-white' 
-        : 'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white'
-    }`}>
-      {message.isStreaming && (
-        <div className="flex items-center mb-2">
-          <div className="animate-pulse h-2 w-2 mr-1 bg-emerald-400 dark:bg-emerald-500 rounded-full"></div>
-          <div className="animate-pulse h-2 w-2 mr-1 bg-emerald-400 dark:bg-emerald-500 rounded-full" style={{animationDelay: '0.2s'}}></div>
-          <div className="animate-pulse h-2 w-2 bg-emerald-400 dark:bg-emerald-500 rounded-full" style={{animationDelay: '0.4s'}}></div>
-        </div>
-      )}
-      <ReactMarkdown>{message.content}</ReactMarkdown>
-      <p className="text-xs mt-1 opacity-70">
-        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-      </p>
-    </div>
-  ) : (
-    <p>{message.content}</p>
-  )}
 
   // Function to handle deleting a knowledge item
   const handleDeleteKnowledgeItem = async (id: string) => {
@@ -1018,7 +1037,32 @@ function App() {
                                     }`}
                                   >
                                     {message.sender === 'ai' ? (
-                                      <ReactMarkdown>{message.content}</ReactMarkdown>
+                                      <>
+                                        {message.isStreaming && (
+                                          <div className="flex items-center mb-2">
+                                            <div className="animate-pulse h-2 w-2 mr-1 bg-emerald-400 dark:bg-emerald-500 rounded-full"></div>
+                                            <div className="animate-pulse h-2 w-2 mr-1 bg-emerald-400 dark:bg-emerald-500 rounded-full" style={{animationDelay: '0.2s'}}></div>
+                                            <div className="animate-pulse h-2 w-2 bg-emerald-400 dark:bg-emerald-500 rounded-full" style={{animationDelay: '0.4s'}}></div>
+                                          </div>
+                                        )}
+                                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                                        {message.sources && message.sources.length > 0 && !message.isStreaming && (
+                                          <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Sources:</p>
+                                            <div className="mt-1 flex flex-wrap gap-1">
+                                              {message.sources.map((source, index) => (
+                                                <span 
+                                                  key={index}
+                                                  className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded-full"
+                                                  title={`Relevance: ${(source.relevance_score * 100).toFixed(1)}%`}
+                                                >
+                                                  {source.id.split('_')[0]}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </>
                                     ) : (
                                       <p>{message.content}</p>
                                     )}
