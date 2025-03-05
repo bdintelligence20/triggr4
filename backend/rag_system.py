@@ -186,7 +186,7 @@ class RAGSystem:
     def generate_streaming_response(self, context, query, callback: Callable[[str], None]):
         """
         Generate a response with streaming using Claude based on retrieved context.
-        Fixed to handle streaming properly and ensure all chunks are sent.
+        Updated to handle the current Anthropic API structure.
         
         Args:
             context: The context information
@@ -232,10 +232,11 @@ class RAGSystem:
                         }
                     ]
                 ) as stream:
-                    for text_delta in stream.text_deltas:
-                        if text_delta.text:
-                            callback(text_delta.text)
-                    
+                    # The correct way to access streaming content in the current Anthropic API
+                    for chunk in stream:
+                        if chunk.type == "content_block_delta" and chunk.delta.text:
+                            callback(chunk.delta.text)
+                        
                     # Stream completed successfully
                     return
                     
