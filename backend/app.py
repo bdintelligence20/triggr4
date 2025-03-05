@@ -500,7 +500,7 @@ def delete_document(item_id):
 
 @app.route('/whatsapp-webhook', methods=['POST'])
 def whatsapp_webhook():
-    """Handle incoming WhatsApp messages with progressive response updates."""
+    """Handle incoming WhatsApp messages with simplified message flow."""
     try:
         # Get the incoming message
         incoming_msg = request.values.get('Body', '').strip()
@@ -532,8 +532,8 @@ def whatsapp_webhook():
             matched_docs = pinecone_client.query_vectors(
                 query_embedding, 
                 namespace="global_knowledge_base",
-                top_k=5,
-                filter_dict=None
+                top_k=5
+                
             )
             
             if not matched_docs:
@@ -543,55 +543,29 @@ def whatsapp_webhook():
                     "📚 I couldn't find any relevant information in our knowledge base. Please try asking a different question."
                 )
             
+            # Send intermediate message
+            send_whatsapp_message(from_number, "🔍 Found relevant information! Preparing your answer...")
+            
             # Prepare context from matched documents
             context_text = "\n\n---\n\n".join([doc['text'] for doc in matched_docs])
             
-            # Send a progress message
-            send_whatsapp_message(from_number, "🔍 Found relevant information! Preparing your answer...")
-            
-            # Track the response generation progress
+            # Collect the full response
             accumulated_text = []
-            current_section = []
-            section_count = 0
             
             def stream_callback(chunk):
-                nonlocal accumulated_text, current_section, section_count
-                
                 accumulated_text.append(chunk)
-                current_section.append(chunk)
-                
-                # Check if we have a natural break point (paragraph or section)
-                if '\n\n' in chunk or '##' in chunk:
-                    section_text = ''.join(current_section)
-                    
-                    # Only send substantial sections (more than 100 characters)
-                    if len(section_text.strip()) > 100:
-                        section_count += 1
-                        
-                        # Add proper emoji for different sections
-                        prefix = "🔹"
-                        if section_count == 1:
-                            prefix = "📋"  # First section/summary
-                        elif "example" in section_text.lower():
-                            prefix = "💡"  # Examples
-                        elif any(word in section_text.lower() for word in ["step", "procedure", "process"]):
-                            prefix = "📝"  # Steps/procedures
-                        
-                        # Send the section as a progressive update
-                        send_whatsapp_message(from_number, f"{prefix} {section_text.strip()}")
-                        
-                        # Reset current section
-                        current_section = []
             
-            # Generate response with streaming
+            # Generate response with streaming (to accumulate the text)
             rag_system.generate_streaming_response(context_text, incoming_msg, stream_callback)
             
             # Get the full response
             full_text = ''.join(accumulated_text)
             
-            # If no sections were sent (no natural breaks), send the complete response
-            if section_count == 0 and full_text:
+            # Send the complete answer
+            if full_text:
                 send_whatsapp_message(from_number, f"📋 {full_text}")
+            else:
+                send_whatsapp_message(from_number, "❓ I couldn't generate a clear answer from the information I found.")
             
             # Send a completion message
             send_whatsapp_message(from_number, "✅ That completes my answer. Let me know if you need any clarification!")
@@ -604,8 +578,7 @@ def whatsapp_webhook():
                 "timestamp": firestore.SERVER_TIMESTAMP,
                 "status": "completed",
                 "in_response_to": conversation_id,
-                "sources": [doc.get('source_id', 'unknown') for doc in matched_docs],
-                "section_count": section_count
+                "sources": [doc.get('source_id', 'unknown') for doc in matched_docs]
             })
             
             # Return empty TwiML response as we've already sent the messages
