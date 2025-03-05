@@ -1,24 +1,50 @@
 import os
 import logging
-from typing import List, Dict, Any, Iterator, Callable
+from typing import List, Dict, Any, Callable
 import anthropic
 import time
 from embedding_utils import EmbeddingService, chunk_text
 from pinecone_client import PineconeClient
 
+# Import CrossEncoder for re-ranking (install via: pip install sentence-transformers)
+from sentence_transformers import CrossEncoder
+cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def re_rank_passages(query: str, passages: List[str]) -> List[str]:
+    """
+    Re-rank a list of passages based on their relevance to the query using a cross-encoder.
+    """
+    pairs = [(query, passage) for passage in passages]
+    scores = cross_encoder.predict(pairs)
+    ranked = sorted(zip(passages, scores), key=lambda x: x[1], reverse=True)
+    return [passage for passage, score in ranked]
+
+def re_rank_matched_docs(query: str, matched_docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Re-rank matched documents (each with a 'text' field) based on their relevance to the query.
+    """
+    passages = [doc['text'] for doc in matched_docs]
+    ranked_passages = re_rank_passages(query, passages)
+    
+    ranked_docs = []
+    for passage in ranked_passages:
+        for doc in matched_docs:
+            if doc['text'] == passage:
+                ranked_docs.append(doc)
+                break
+    return ranked_docs
+
 class RAGSystem:
     def __init__(self, openai_api_key=None, anthropic_api_key=None, pinecone_api_key=None, index_name="knowledge-hub-vectors"):
         """Initialize the RAG system with necessary components."""
-        # Get API keys from environment if not provided
         self.openai_api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
         self.anthropic_api_key = anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
         self.pinecone_api_key = pinecone_api_key or os.environ.get("PINECONE_API_KEY")
         
-        # Validate API keys
         if not all([self.openai_api_key, self.anthropic_api_key, self.pinecone_api_key]):
             missing = []
             if not self.openai_api_key: missing.append("OpenAI")
@@ -26,7 +52,6 @@ class RAGSystem:
             if not self.pinecone_api_key: missing.append("Pinecone")
             raise ValueError(f"Missing API keys: {', '.join(missing)}")
         
-        # Initialize components
         self.embedding_service = EmbeddingService(api_key=self.openai_api_key)
         self.pinecone_client = PineconeClient(api_key=self.pinecone_api_key, index_name=index_name)
         self.anthropic_client = anthropic.Client(api_key=self.anthropic_api_key)
@@ -37,7 +62,7 @@ class RAGSystem:
         """Process a document and store it in the vector database."""
         logger.info(f"Processing document: {source_id}")
         
-        # Step 1: Chunk the document
+        # Step 1: Chunk the document using semantic-aware chunking
         chunks = chunk_text(doc_text)
         if not chunks:
             logger.warning(f"No chunks created for document: {source_id}")
@@ -70,13 +95,11 @@ class RAGSystem:
                 "sources": []
             }
             
-        # Create filter dict if category is provided
-        filter_dict = None
-        if category:
-            filter_dict = {"category": category}
+        # Optionally apply a category filter
+        filter_dict = {"category": category} if category else None
         
-        # Step 2: Query Pinecone with slightly more results
-        extended_top_k = min(top_k + 3, 10)  # Get a few extra results, but not too many
+        # Step 2: Query Pinecone with extra candidates
+        extended_top_k = min(top_k + 3, 10)
         matched_docs = self.pinecone_client.query_vectors(
             query_embedding, 
             namespace=namespace,
@@ -91,17 +114,20 @@ class RAGSystem:
                 "sources": []
             }
             
-        logger.info(f"Found {len(matched_docs)} relevant documents")
+        logger.info(f"Found {len(matched_docs)} relevant documents before re-ranking")
         
-        # Step 3: Prepare context for Claude with improved context formatting
-        # Join chunks with clear section breaks for better context
+        # --- Re-Ranking Retrieved Passages ---
+        matched_docs = re_rank_matched_docs(user_query, matched_docs)
+        logger.info("Documents re-ranked based on query relevance")
+        
+        # Step 3: Prepare context for the response (using only the top_k documents)
         context_chunks = []
-        for i, doc in enumerate(matched_docs[:top_k]):  # Only use top_k for the final answer
+        for i, doc in enumerate(matched_docs[:top_k]):
             context_chunks.append(f"Document {i+1}:\n{doc['text']}")
         
         context_text = "\n\n---\n\n".join(context_chunks)
         
-        # Create source information for citation
+        # Prepare source information for citation
         sources = []
         for i, doc in enumerate(matched_docs[:top_k]):
             sources.append({
@@ -109,12 +135,10 @@ class RAGSystem:
                 "relevance_score": doc.get('score', 0)
             })
         
-    
-            
         try:
             if stream_callback is None:
                 # Non-streaming response
-                response = self.generate_response(context_text, user_query)
+                response = self.generate_response(context_text, user_query, lambda _: None)
                 return {
                     "answer": response,
                     "sources": sources
@@ -123,7 +147,7 @@ class RAGSystem:
                 # Streaming response
                 self.generate_streaming_response(context_text, user_query, stream_callback)
                 return {
-                    "answer": "",  # Empty because content was streamed via callback
+                    "answer": "",  # Content streamed via callback
                     "sources": sources
                 }
             
@@ -137,57 +161,40 @@ class RAGSystem:
     def generate_response(self, context, query, callback: Callable[[str], None]):
         """
         Generate a non-streaming response using Claude based on retrieved context,
-        but call the callback function with chunks as they're processed.
-        
-        Args:
-            context: The context information
-            query: The user's question
-            callback: Function that accepts each chunk of text as it's received
+        while also calling the callback function with streaming chunks.
         """
         prompt = f"""
-        You are a helpful, knowledgeable AI assistant tasked with answering questions based on provided context information.
-        
+        You are a helpful, knowledgeable, and friendly AI assistant tasked with answering questions based on provided context information.
+
         Context information:
         ```
         {context}
         ```
-        
+
         User Question: {query}
-        
+
         Guidelines:
-        1. Answer the question based ONLY on the provided context information.
+        1. Answer the question based on the provided context.
         2. If the context doesn't contain relevant information, clearly state this.
-        3. Be precise, clear, and factual.
-        4. Structure your response with clear section breaks - use double newlines between paragraphs and sections.
-        5. Start with a brief summary of the answer.
-        6. Use clear headings (## Heading) for different sections.
-        7. When listing steps or items, put each on a new line with proper numbering or bullet points.
-        8. Use clear formatting to make your response easy to read in small chunks.
-        9. Make sure each paragraph or section can stand alone and make sense if read separately.
-        10. If discussing policies or procedures, clearly separate different aspects.
-        
-        Format your response with clear section breaks to make it easy to read in chunks.
+        3. If the context doesn't fully answer the question, supplement your response with additional relevant information from your training.
+        4. Use a warm and personable tone with a friendly greeting.
+        5. Structure your response with clear section breaks (double newlines).
+        6. Use bullet points or numbering for clarity.
+        7. Conclude with a friendly sign-off.
         """
         
         try:
             response = self.anthropic_client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-3-7-sonnet-20250219",
                 max_tokens=8000,
                 temperature=1,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
+                messages=[{"role": "user", "content": prompt}]
             )
             
-            # Get the complete text
             full_text = response.content[0].text
             
-            # Simulate streaming by splitting the text into chunks and sending them
-            # through the callback function with small delays
-            chunk_size = 10  # Characters per chunk
+            # Simulate streaming by splitting text into small chunks and invoking the callback
+            chunk_size = 10  # characters per chunk
             for i in range(0, len(full_text), chunk_size):
                 chunk = full_text[i:i+chunk_size]
                 callback(chunk)
@@ -201,66 +208,45 @@ class RAGSystem:
                     
     def generate_streaming_response(self, context, query, callback: Callable[[str], None]):
         """
-        Generate a response with streaming using Claude based on retrieved context.
-        Updated to handle the current Anthropic API structure.
-        
-        Args:
-            context: The context information
-            query: The user's question
-            callback: Function that accepts each chunk of text as it's received
+        Generate a streaming response using Claude based on retrieved context.
         """
         prompt = f"""
-        You are a helpful, knowledgeable AI assistant tasked with answering questions based on provided context information.
-        
+        You are a helpful, knowledgeable, and friendly AI assistant tasked with answering questions based on provided context information.
+
         Context information:
         ```
         {context}
         ```
-        
+
         User Question: {query}
-        
+
         Guidelines:
-        1. Answer the question based ONLY on the provided context information.
+        1. Answer the question based on the provided context.
         2. If the context doesn't contain relevant information, clearly state this.
-        3. Be precise, clear, and factual.
-        4. Structure your response with clear section breaks - use double newlines between paragraphs and sections.
-        5. Start with a brief summary of the answer.
-        6. Use clear headings (## Heading) for different sections.
-        7. When listing steps or items, put each on a new line with proper numbering or bullet points.
-        8. Use clear formatting to make your response easy to read in small chunks.
-        9. Make sure each paragraph or section can stand alone and make sense if read separately.
-        10. If discussing policies or procedures, clearly separate different aspects.
-        
-        Format your response with clear section breaks to make it easy to read in chunks.
+        3. If the context doesn't fully answer the question, supplement your response with additional relevant information from your training.
+        4. Use a warm and personable tone with a friendly greeting.
+        5. Structure your response with clear section breaks (double newlines).
+        6. Use bullet points or numbering for clarity.
+        7. Conclude with a friendly sign-off.
         """
         
         max_retries = 3
         for attempt in range(max_retries):
             try:
                 with self.anthropic_client.messages.stream(
-                    model="claude-3-5-sonnet-20241022",
+                    model="claude-3-7-sonnet-20250219",
                     max_tokens=8000,
                     temperature=1,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ]
+                    messages=[{"role": "user", "content": prompt}]
                 ) as stream:
-                    # The correct way to access streaming content in the current Anthropic API
                     for chunk in stream:
                         if chunk.type == "content_block_delta" and chunk.delta.text:
                             callback(chunk.delta.text)
-                        
-                    # Stream completed successfully
                     return
-                    
             except Exception as e:
                 logger.error(f"Error from Claude API streaming (attempt {attempt+1}): {str(e)}")
                 if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)  # Exponential backoff
+                    time.sleep(2 ** attempt)
                 else:
-                    # On final failure, send error message through callback
                     callback("\n\nI'm sorry, I encountered an error while generating a response. Please try again.")
                     raise

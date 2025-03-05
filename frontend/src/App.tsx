@@ -410,17 +410,12 @@ function App() {
 
   // Generate a WhatsApp number
   const generateWhatsappNumber = () => {
-    // In a real app, this would call an API to generate a WhatsApp number
-    const countryCode = '+1'; // US code
-    const areaCode = Math.floor(Math.random() * 900) + 100; // Random 3-digit area code
-    const firstPart = Math.floor(Math.random() * 900) + 100; // Random 3-digit number
-    const secondPart = Math.floor(Math.random() * 9000) + 1000; // Random 4-digit number
-    
-    const number = `${countryCode} (${areaCode}) ${firstPart}-${secondPart}`;
+    // Use the fixed WhatsApp number since that's the only working one
+    const number = "+14155238886";
     setWhatsappNumber(number);
     setShowShareOptions(true);
-    
-    // Update categories with whatsapp number if a category is selected
+  
+    // Update categories with the WhatsApp number if a category is selected
     if (chatCategory && chatCategory !== 'all') {
       setCategories(categories.map(category => 
         category.id === chatCategory 
@@ -448,7 +443,8 @@ function App() {
     if (!whatsappNumber) return;
     
     let shareUrl = '';
-    const message = `Here's the WhatsApp number for my knowledge base: ${whatsappNumber}`;
+    // Prepend the sandbox code "join wife-universe - " to the message
+    const message = `join wife-universe - Here's the WhatsApp number for the HR HUB: ${whatsappNumber}`;
     
     switch (method) {
       case 'whatsapp':
@@ -464,9 +460,9 @@ function App() {
         return;
     }
     
-    // Open in a new tab
     window.open(shareUrl, '_blank');
   };
+  
 
   // Helper function to format file size
   const formatFileSize = (bytes: number): string => {

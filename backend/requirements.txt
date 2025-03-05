@@ -17,6 +17,8 @@ google-cloud-storage
 openai
 anthropic
 twilio
+nltk
+sentence-transformers
 
 # File Processing
 PyPDF2

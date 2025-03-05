@@ -1,8 +1,13 @@
-import tiktoken
+import nltk
 import logging
 import os
 from openai import OpenAI
 import time
+import tiktoken
+
+# Download NLTK’s Punkt sentence tokenizer if not already present
+nltk.download('punkt', quiet=True)
+from nltk.tokenize import sent_tokenize
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -10,9 +15,9 @@ logger = logging.getLogger(__name__)
 
 # Initialize tokenizer and model settings
 TOKENIZER = tiktoken.get_encoding("cl100k_base")  # Used for text splitting
-EMBEDDING_MODEL = "text-embedding-3-large"  # OpenAI's embedding model
-MAX_TOKENS = 1500  # Max tokens per chunk
-OVERLAP_TOKENS = 100  # Token overlap between chunks
+EMBEDDING_MODEL = "text-embedding-3-large"         # OpenAI's embedding model
+MAX_TOKENS = 1500                                  # Max tokens per chunk
+OVERLAP_TOKENS = 100                               # Token overlap between chunks
 
 class EmbeddingService:
     def __init__(self, api_key=None):
@@ -77,42 +82,42 @@ class EmbeddingService:
                 return None
                 
         return embeddings
-            
+
 def chunk_text(text, max_tokens=MAX_TOKENS, overlap_tokens=OVERLAP_TOKENS):
-    """Split text into chunks with token overlap for better context preservation."""
+    """
+    Semantic-Aware Chunking:
+    Split text into coherent chunks based on sentence boundaries using NLTK.
+    This method groups sentences so that each chunk is roughly within the max_tokens limit,
+    and ensures natural break points for better context retrieval.
+    """
     if not text:
         return []
         
-    tokens = TOKENIZER.encode(text)
+    sentences = sent_tokenize(text)
     chunks = []
-    i = 0
+    current_chunk_sentences = []
+    current_token_count = 0
     
-    while i < len(tokens):
-        # Get chunk with specified max tokens
-        chunk_end = min(i + max_tokens, len(tokens))
-        chunk = tokens[i:chunk_end]
+    for sentence in sentences:
+        sentence_tokens = TOKENIZER.encode(sentence)
+        sentence_token_count = len(sentence_tokens)
         
-        # If not at the end and chunk is long enough, find a better break point
-        if chunk_end < len(tokens) and len(chunk) > 200:
-            # Try to break at a sentence or paragraph boundary
-            text_chunk = TOKENIZER.decode(chunk)
-            # Look for paragraph breaks first, then sentence boundaries
-            for delimiter in ['\n\n', '\n', '. ', '! ', '? ', '; ']:
-                # Find the last occurrence of the delimiter
-                last_delimiter = text_chunk.rfind(delimiter)
-                if last_delimiter > max(0, len(text_chunk) - 100):  # Not too early
-                    # Recalculate chunk_end based on this delimiter position
-                    adjusted_text = text_chunk[:last_delimiter + len(delimiter)]
-                    adjusted_tokens = TOKENIZER.encode(adjusted_text)
-                    chunk = adjusted_tokens
-                    chunk_end = i + len(adjusted_tokens)
-                    break
-                    
-        # Add the chunk
-        chunks.append(TOKENIZER.decode(chunk))
+        # If adding this sentence exceeds the max token limit and we already have some content:
+        if current_token_count + sentence_token_count > max_tokens and current_chunk_sentences:
+            # Create a chunk from the current sentences
+            chunk_text_val = " ".join(current_chunk_sentences)
+            chunks.append(chunk_text_val)
+            
+            # For overlap, retain the last sentence(s)
+            overlap = current_chunk_sentences[-1:]
+            current_chunk_sentences = overlap.copy()
+            current_token_count = len(TOKENIZER.encode(" ".join(current_chunk_sentences)))
         
-        # Move to next chunk with overlap
-        i = max(i + 1, chunk_end - overlap_tokens)
+        current_chunk_sentences.append(sentence)
+        current_token_count += sentence_token_count
+
+    if current_chunk_sentences:
+        chunks.append(" ".join(current_chunk_sentences))
     
-    logger.info(f"Split text into {len(chunks)} chunks")
+    logger.info(f"Split text into {len(chunks)} semantic chunks")
     return chunks
