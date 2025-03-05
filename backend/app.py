@@ -463,7 +463,7 @@ def list_documents():
 
 @app.route('/delete/<item_id>', methods=['DELETE'])
 def delete_document(item_id):
-    """Delete a document and its vectors from the knowledge base."""
+    """Delete a document and its vectors from the knowledge base with verification."""
     try:
         # Get the document
         doc_ref = db.collection("knowledge_items").document(item_id)
@@ -474,18 +474,107 @@ def delete_document(item_id):
             
         doc_data = doc.to_dict()
         
-        # Delete from Pinecone using filter by source_id
+        # 1. First, verify vectors exist for this document
         try:
-            # We can't use the old delete by ID method, need to use filter instead
-            deleted = pinecone_client.index.delete(
-                filter={"source_id": item_id},
+            # Get stats before deletion to confirm vectors exist
+            before_stats = pinecone_client.index.describe_index_stats()
+            before_count = before_stats.get("total_vector_count", 0)
+            
+            logger.info(f"Before deletion: {before_count} total vectors in index")
+            
+            # Count vectors for this specific document
+            matching_vectors = pinecone_client.index.query(
+                vector=[0.1] * 3072,  # Dummy vector for the query
+                top_k=1,
+                include_metadata=True,
+                filter={"source_id": {"$eq": item_id}},
                 namespace="global_knowledge_base"
             )
-            logger.info(f"Deleted vectors for document {item_id}")
+            
+            # Use fetch instead if available in your Pinecone version
+            # matching_vectors = pinecone_client.index.fetch(
+            #     ids=[],
+            #     namespace="global_knowledge_base",
+            #     filter={"source_id": {"$eq": item_id}}
+            # )
+            
+            if hasattr(matching_vectors, "matches") and len(matching_vectors.matches) > 0:
+                logger.info(f"Found vectors to delete for document {item_id}")
+            else:
+                logger.warning(f"No vectors found for document {item_id}")
         except Exception as e:
-            logger.warning(f"Failed to delete vectors: {str(e)}")
+            logger.warning(f"Error checking for existing vectors: {str(e)}")
         
-        # Delete from GCS if URL exists
+        # 2. Delete vectors with retry logic
+        vectors_deleted = False
+        max_retries = 3
+        
+        for attempt in range(max_retries):
+            try:
+                # Attempt to delete by filter
+                delete_response = pinecone_client.index.delete(
+                    filter={"source_id": {"$eq": item_id}},
+                    namespace="global_knowledge_base"
+                )
+                
+                # Verify deletion (wait a moment for propagation)
+                time.sleep(1)
+                
+                after_stats = pinecone_client.index.describe_index_stats()
+                after_count = after_stats.get("total_vector_count", 0)
+                
+                deleted_count = before_count - after_count
+                
+                if deleted_count > 0:
+                    logger.info(f"Successfully deleted {deleted_count} vectors for document {item_id}")
+                    vectors_deleted = True
+                    break
+                else:
+                    logger.warning(f"Deletion called but no vector count change detected. Retrying...")
+                    
+            except Exception as e:
+                logger.error(f"Vector deletion attempt {attempt+1} failed: {str(e)}")
+                
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)  # Exponential backoff
+        
+        if not vectors_deleted:
+            # Try alternative deletion method - delete by ID prefix
+            try:
+                # Query for all vector IDs with this prefix
+                vector_ids = []
+                dummy_query = [0.1] * 3072  # Dummy vector for querying
+                
+                # Use a large top_k to try to get all relevant vectors
+                results = pinecone_client.index.query(
+                    vector=dummy_query,
+                    top_k=1000,  # Adjust based on your maximum expected chunks per document
+                    include_metadata=True,
+                    filter={"source_id": {"$eq": item_id}},
+                    namespace="global_knowledge_base"
+                )
+                
+                if hasattr(results, "matches"):
+                    for match in results.matches:
+                        vector_ids.append(match.id)
+                
+                if vector_ids:
+                    logger.info(f"Found {len(vector_ids)} vector IDs to delete directly")
+                    
+                    # Delete vectors by ID
+                    delete_response = pinecone_client.index.delete(
+                        ids=vector_ids,
+                        namespace="global_knowledge_base"
+                    )
+                    
+                    logger.info(f"Direct deletion response: {delete_response}")
+                    vectors_deleted = True
+                else:
+                    logger.warning(f"No vector IDs found for direct deletion for document {item_id}")
+            except Exception as e:
+                logger.error(f"Alternative vector deletion failed: {str(e)}")
+        
+        # 3. Delete from GCS if URL exists
         if 'file_url' in doc_data:
             try:
                 file_path = doc_data['file_url'].split('/')[-1]
@@ -495,10 +584,16 @@ def delete_document(item_id):
             except Exception as e:
                 logger.warning(f"Failed to delete file from GCS: {str(e)}")
         
-        # Delete from Firestore
+        # 4. Delete from Firestore
         doc_ref.delete()
         
-        return jsonify({"message": "Document deleted successfully"})
+        # 5. Return detailed response
+        return jsonify({
+            "message": "Document deleted successfully",
+            "document_id": item_id,
+            "vectors_deleted": vectors_deleted,
+            "file_deleted": 'file_url' in doc_data
+        })
         
     except Exception as e:
         logger.error(f"Delete error: {str(e)}")
