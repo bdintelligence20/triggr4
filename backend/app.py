@@ -637,10 +637,21 @@ def send_whatsapp_message(to_number, message_body):
             logger.error("Twilio client not initialized")
             return create_twilio_response(message_body)
         
+        # Make sure the to_number has WhatsApp prefix if it doesn't already
+        if not to_number.startswith('whatsapp:'):
+            to_number = f"whatsapp:{to_number}"
+        
+        # Format the WhatsApp from number correctly - DON'T add prefix if it already has one
+        from_number = TWILIO_WHATSAPP_FROM
+        if not from_number.startswith('whatsapp:'):
+            from_number = f"whatsapp:{from_number}"
+            
+        logger.info(f"Sending WhatsApp from {from_number} to {to_number}")
+            
         # Send message
         message = twilio_client.messages.create(
             body=message_body,
-            from_=f"whatsapp:{TWILIO_WHATSAPP_FROM}",
+            from_=from_number,
             to=to_number
         )
         
