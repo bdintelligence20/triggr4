@@ -389,15 +389,18 @@ def query():
                 "streaming": False
             })
         else:
-            # Set up streaming response
+            # Set up streaming response using the RAG system
             def generate():
-                chunks = []
+                # Send proper SSE headers
+                yield "Content-Type: text/event-stream\n"
+                yield "Cache-Control: no-cache\n"
+                yield "Connection: keep-alive\n\n"
                 
+                # Create a callback to forward chunks to client
                 def stream_callback(chunk):
-                    chunks.append(chunk)
                     yield f"data: {json.dumps({'chunk': chunk})}\n\n"
                 
-                # Process query with streaming enabled
+                # Process query with streaming using RAG system
                 result = rag_system.query(
                     query_text, 
                     namespace="global_knowledge_base",
@@ -406,7 +409,10 @@ def query():
                 )
                 
                 # Send sources at the end
-                yield f"data: {json.dumps({'sources': result['sources'], 'done': True})}\n\n"
+                yield f"data: {json.dumps({'sources': result['sources']})}\n\n"
+                
+                # Signal completion
+                yield f"data: {json.dumps({'done': True})}\n\n"
             
             return Response(generate(), mimetype="text/event-stream")
         
