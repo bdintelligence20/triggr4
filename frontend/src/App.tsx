@@ -487,7 +487,7 @@ function App() {
                   >
                     <div className="flex items-center">
                       <FileText size={20} className="mr-3" />
-                      <span>Categories</span>
+                      <span>Hubs</span>
                     </div>
                     {categoriesOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   </button>
