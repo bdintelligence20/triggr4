@@ -65,8 +65,7 @@ function App() {
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([
     { id: 'all', name: 'All Items' },
-    { id: 'general', name: 'General' },
-    { id: 'documents', name: 'Documents' }
+    { id: 'hrhub', name: 'HR Hub' }
   ]);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
@@ -83,11 +82,12 @@ function App() {
       (item.content && item.content.toLowerCase().includes(searchQuery.toLowerCase()));
     
     const matchesCategory = selectedCategory === 'all' || 
-                           (selectedCategory === 'documents' ? (item.type === 'pdf' || item.type === 'doc') 
-                            : item.category === selectedCategory);
+      (selectedCategory === 'hrhub' ? (item.type === 'pdf' || item.type === 'doc') 
+        : item.category === selectedCategory);
     
     return matchesSearch && matchesCategory;
   });
+  
 
   // Filter chat messages based on selected chat category
   const filteredChatMessages = chatCategory ? chatMessages.filter(msg => !msg.category || msg.category === chatCategory) : [];
@@ -136,7 +136,7 @@ function App() {
           const loadedItems = data.documents.map(doc => ({
             id: doc.id,
             title: doc.title,
-            category: doc.category === 'general' ? 'general' : 'documents',
+            category: (doc.category === 'general' || doc.category === 'documents') ? 'hrhub' : doc.category,
             createdAt: new Date(doc.created_at || Date.now()),
             type: doc.file_type === 'pdf' ? 'pdf' : doc.file_type === 'doc' ? 'doc' : 'text',
             fileSize: doc.word_count ? `${doc.word_count} words` : undefined,
@@ -195,7 +195,7 @@ function App() {
         // Create FormData
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('category', selectedCategory === 'all' ? 'general' : selectedCategory);
+        formData.append('category', selectedCategory === 'all' ? 'hrhub' : selectedCategory);
         formData.append('title', fileName);
         
         // Send file to backend

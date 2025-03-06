@@ -675,40 +675,55 @@ def create_twilio_response(message):
         resp.message(message)
     return str(resp)
 
+def split_long_sentence(sentence, max_length):
+    """
+    Splits a long sentence into multiple chunks without breaking words.
+    """
+    words = sentence.split()
+    chunks = []
+    current_chunk = ""
+    for word in words:
+        # Add a space only if current_chunk isn't empty
+        additional_space = 1 if current_chunk else 0
+        if len(current_chunk) + len(word) + additional_space <= max_length:
+            current_chunk = f"{current_chunk} {word}".strip()
+        else:
+            if current_chunk:
+                chunks.append(current_chunk)
+            current_chunk = word
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
+
 def split_message_semantically(message_body, max_length=1600):
     """
     Splits a message into semantically coherent chunks using sentence boundaries.
-    If a single sentence is too long, it will further split that sentence at a space.
+    If a single sentence is too long, it is further split using word boundaries.
     """
     sentences = sent_tokenize(message_body)
     chunks = []
     current_chunk = ""
     
     for sentence in sentences:
-        # If adding the sentence exceeds the limit, append the current chunk and start a new one.
+        # If adding the sentence exceeds the limit, start a new chunk.
         if len(current_chunk) + len(sentence) + 1 > max_length:
             if current_chunk:
-                chunks.append(current_chunk)
+                chunks.append(current_chunk.strip())
                 current_chunk = sentence
             else:
-                # If a single sentence is longer than max_length, break it at the last space.
-                while len(sentence) > max_length:
-                    split_point = sentence.rfind(" ", 0, max_length)
-                    if split_point == -1:
-                        split_point = max_length
-                    chunks.append(sentence[:split_point])
-                    sentence = sentence[split_point:].strip()
-                current_chunk = sentence
+                # If a single sentence is too long, split it by words.
+                long_chunks = split_long_sentence(sentence, max_length)
+                # Append all but the last chunk, and use the last chunk as the new current_chunk.
+                chunks.extend(long_chunks[:-1])
+                current_chunk = long_chunks[-1]
         else:
-            # Add the sentence to the current chunk.
             if current_chunk:
                 current_chunk += " " + sentence
             else:
                 current_chunk = sentence
 
-    # Append any remaining text as the final chunk.
     if current_chunk:
-        chunks.append(current_chunk)
+        chunks.append(current_chunk.strip())
     
     return chunks
 
