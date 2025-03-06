@@ -203,47 +203,47 @@ class RAGSystem:
             callback("\n\nI'm sorry, I encountered an error while generating a response. Please try again.")
             raise
 
-def generate_streaming_response(self, context, query, callback: Callable[[str], None], conversation_history=""):
-    prompt = f"""
-    You are a helpful, knowledgeable, and friendly AI assistant.
-    
-    Conversation History:
-    {conversation_history}
-    
-    Context information:
-    ```
-    {context}
-    ```
-    
-    User Question: {query}
-    
-    Guidelines:
-    1. Answer the question based on the provided context and conversation history.
-    2. If the context does not fully answer the question, supplement with additional relevant knowledge.
-    3. Use a warm and personable tone with a friendly greeting.
-    4. Structure your response with clear section breaks.
-    5. Use bullet points or numbering for clarity.
-    6. Conclude with a friendly sign-off.
-    """
-    
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            with self.anthropic_client.messages.stream(
-                model="claude-3-7-sonnet-20250219",
-                max_tokens=8000,
-                temperature=1,
-                messages=[{"role": "user", "content": prompt}]
-            ) as stream:
-                for chunk in stream:
-                    if chunk.type == "content_block_delta" and chunk.delta.text:
-                        callback(chunk.delta.text)
-                return
-        except Exception as e:
-            logger.error(f"Error from Claude API streaming (attempt {attempt+1}): {str(e)}")
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
-            else:
-                callback("\n\nI'm sorry, I encountered an error while generating a response. Please try again.")
-                raise
+    def generate_streaming_response(self, context, query, callback: Callable[[str], None], conversation_history=""):
+        prompt = f"""
+        You are a helpful, knowledgeable, and friendly AI assistant.
+        
+        Conversation History:
+        {conversation_history}
+        
+        Context information:
+        ```
+        {context}
+        ```
+        
+        User Question: {query}
+        
+        Guidelines:
+        1. Answer the question based on the provided context and conversation history.
+        2. If the context does not fully answer the question, supplement with additional relevant knowledge.
+        3. Use a warm and personable tone with a friendly greeting.
+        4. Structure your response with clear section breaks.
+        5. Use bullet points or numbering for clarity.
+        6. Conclude with a friendly sign-off.
+        """
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with self.anthropic_client.messages.stream(
+                    model="claude-3-7-sonnet-20250219",
+                    max_tokens=8000,
+                    temperature=1,
+                    messages=[{"role": "user", "content": prompt}]
+                ) as stream:
+                    for chunk in stream:
+                        if chunk.type == "content_block_delta" and chunk.delta.text:
+                            callback(chunk.delta.text)
+                    return
+            except Exception as e:
+                logger.error(f"Error from Claude API streaming (attempt {attempt+1}): {str(e)}")
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    callback("\n\nI'm sorry, I encountered an error while generating a response. Please try again.")
+                    raise
 
