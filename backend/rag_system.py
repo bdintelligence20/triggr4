@@ -82,8 +82,11 @@ class RAGSystem:
         
         return vectors_stored
         
-    def query(self, user_query, namespace="global_knowledge_base", top_k=5, category=None, stream_callback=None):
-        """Query the system with a user question and get an AI response with more context."""
+    def query(self, user_query, namespace="global_knowledge_base", top_k=5, category=None, stream_callback=None, history=""):
+        """
+        Query the system with a user question and return an AI response using retrieved context.
+        The optional 'history' parameter is used to include conversation context for follow-up questions.
+        """
         logger.info(f"Processing query: '{user_query}'")
         
         # Step 1: Generate embedding for the query
@@ -99,7 +102,7 @@ class RAGSystem:
         filter_dict = {"category": category} if category else None
         
         # Step 2: Query Pinecone with extra candidates
-        extended_top_k = min(top_k + 3, 10)
+        extended_top_k = min(top_k + 3, 10)  # Get a few extra candidates
         matched_docs = self.pinecone_client.query_vectors(
             query_embedding, 
             namespace=namespace,
@@ -116,15 +119,14 @@ class RAGSystem:
             
         logger.info(f"Found {len(matched_docs)} relevant documents before re-ranking")
         
-        # --- Re-Ranking Retrieved Passages ---
+        # Re-rank the documents using a cross-encoder
         matched_docs = re_rank_matched_docs(user_query, matched_docs)
         logger.info("Documents re-ranked based on query relevance")
         
-        # Step 3: Prepare context for the response (using only the top_k documents)
+        # Step 3: Prepare context from the top_k documents
         context_chunks = []
         for i, doc in enumerate(matched_docs[:top_k]):
             context_chunks.append(f"Document {i+1}:\n{doc['text']}")
-        
         context_text = "\n\n---\n\n".join(context_chunks)
         
         # Prepare source information for citation
@@ -137,15 +139,15 @@ class RAGSystem:
         
         try:
             if stream_callback is None:
-                # Non-streaming response
-                response = self.generate_response(context_text, user_query, lambda _: None)
+                # Non-streaming response: include conversation history in the prompt
+                response = self.generate_response(context_text, user_query, lambda _: None, conversation_history=history)
                 return {
                     "answer": response,
                     "sources": sources
                 }
             else:
-                # Streaming response
-                self.generate_streaming_response(context_text, user_query, stream_callback)
+                # Streaming response: pass conversation history as well
+                self.generate_streaming_response(context_text, user_query, stream_callback, conversation_history=history)
                 return {
                     "answer": "",  # Content streamed via callback
                     "sources": sources
@@ -157,30 +159,29 @@ class RAGSystem:
                 "answer": "I found some relevant information but had trouble generating a response.",
                 "sources": sources
             }
-            
-    def generate_response(self, context, query, callback: Callable[[str], None]):
-        """
-        Generate a non-streaming response using Claude based on retrieved context,
-        while also calling the callback function with streaming chunks.
-        """
-        prompt = f"""
-        You are a helpful, knowledgeable, and friendly AI assistant tasked with answering questions based on provided context information.
 
+            
+    def generate_response(self, context, query, callback: Callable[[str], None], conversation_history=""):
+        prompt = f"""
+        You are a helpful, knowledgeable, and friendly AI assistant.
+        
+        Conversation History:
+        {conversation_history}
+        
         Context information:
         ```
         {context}
         ```
-
+        
         User Question: {query}
-
+        
         Guidelines:
-        1. Answer the question based on the provided context.
-        2. If the context doesn't contain relevant information, clearly state this.
-        3. If the context doesn't fully answer the question, supplement your response with additional relevant information from your training.
-        4. Use a warm and personable tone with a friendly greeting.
-        5. Structure your response with clear section breaks (double newlines).
-        6. Use bullet points or numbering for clarity.
-        7. Conclude with a friendly sign-off.
+        1. Answer the question based on the provided context and conversation history.
+        2. If the context does not fully answer the question, supplement with relevant additional knowledge.
+        3. Use a warm and personable tone with a friendly greeting.
+        4. Structure your response with clear section breaks.
+        5. Use bullet points or numbering for clarity.
+        6. Conclude with a friendly sign-off.
         """
         
         try:
@@ -190,63 +191,59 @@ class RAGSystem:
                 temperature=1,
                 messages=[{"role": "user", "content": prompt}]
             )
-            
             full_text = response.content[0].text
-            
-            # Simulate streaming by splitting text into small chunks and invoking the callback
-            chunk_size = 10  # characters per chunk
+            chunk_size = 10
             for i in range(0, len(full_text), chunk_size):
                 chunk = full_text[i:i+chunk_size]
                 callback(chunk)
-                time.sleep(0.01)  # Small delay to simulate streaming
-                
+                time.sleep(0.01)
             return full_text
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}")
             callback("\n\nI'm sorry, I encountered an error while generating a response. Please try again.")
             raise
-                    
-    def generate_streaming_response(self, context, query, callback: Callable[[str], None]):
-        """
-        Generate a streaming response using Claude based on retrieved context.
-        """
-        prompt = f"""
-        You are a helpful, knowledgeable, and friendly AI assistant tasked with answering questions based on provided context information.
 
-        Context information:
-        ```
-        {context}
-        ```
+def generate_streaming_response(self, context, query, callback: Callable[[str], None], conversation_history=""):
+    prompt = f"""
+    You are a helpful, knowledgeable, and friendly AI assistant.
+    
+    Conversation History:
+    {conversation_history}
+    
+    Context information:
+    ```
+    {context}
+    ```
+    
+    User Question: {query}
+    
+    Guidelines:
+    1. Answer the question based on the provided context and conversation history.
+    2. If the context does not fully answer the question, supplement with additional relevant knowledge.
+    3. Use a warm and personable tone with a friendly greeting.
+    4. Structure your response with clear section breaks.
+    5. Use bullet points or numbering for clarity.
+    6. Conclude with a friendly sign-off.
+    """
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            with self.anthropic_client.messages.stream(
+                model="claude-3-7-sonnet-20250219",
+                max_tokens=8000,
+                temperature=1,
+                messages=[{"role": "user", "content": prompt}]
+            ) as stream:
+                for chunk in stream:
+                    if chunk.type == "content_block_delta" and chunk.delta.text:
+                        callback(chunk.delta.text)
+                return
+        except Exception as e:
+            logger.error(f"Error from Claude API streaming (attempt {attempt+1}): {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+            else:
+                callback("\n\nI'm sorry, I encountered an error while generating a response. Please try again.")
+                raise
 
-        User Question: {query}
-
-        Guidelines:
-        1. Answer the question based on the provided context.
-        2. If the context doesn't contain relevant information, clearly state this.
-        3. If the context doesn't fully answer the question, supplement your response with additional relevant information from your training.
-        4. Use a warm and personable tone with a friendly greeting.
-        5. Structure your response with clear section breaks (double newlines).
-        6. Use bullet points or numbering for clarity.
-        7. Conclude with a friendly sign-off.
-        """
-        
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                with self.anthropic_client.messages.stream(
-                    model="claude-3-7-sonnet-20250219",
-                    max_tokens=8000,
-                    temperature=1,
-                    messages=[{"role": "user", "content": prompt}]
-                ) as stream:
-                    for chunk in stream:
-                        if chunk.type == "content_block_delta" and chunk.delta.text:
-                            callback(chunk.delta.text)
-                    return
-            except Exception as e:
-                logger.error(f"Error from Claude API streaming (attempt {attempt+1}): {str(e)}")
-                if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)
-                else:
-                    callback("\n\nI'm sorry, I encountered an error while generating a response. Please try again.")
-                    raise

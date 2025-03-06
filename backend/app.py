@@ -359,36 +359,37 @@ def upload_document():
 
 @app.route('/query', methods=['POST'])
 def query():
-    """Query the knowledge base using RAG with streaming support and status indicators."""
     data = request.get_json()
     query_text = data.get("query")
     category = data.get("category")
     stream_enabled = data.get("stream", False)
-    
+    conversation_history = data.get("history", "")  # NEW: read history field
+
     logger.info(f"Query received: '{query_text}', category: '{category}', stream: {stream_enabled}")
     
     if not query_text or not isinstance(query_text, str) or len(query_text.strip()) < 2:
         return jsonify({"error": "Invalid or empty query"}), 400
 
     try:
-        # Log query for analytics
         db.collection("queries").add({
             "query": query_text,
             "category": category,
             "timestamp": firestore.SERVER_TIMESTAMP,
             "client_ip": request.remote_addr,
-            "stream_enabled": stream_enabled
+            "stream_enabled": stream_enabled,
+            "history": conversation_history  # Optionally log history
         })
         
         if not stream_enabled:
-            # Standard non-streaming response
+            # Pass conversation history to the RAG system
             result = rag_system.query(
                 query_text, 
                 namespace="global_knowledge_base",
                 top_k=5,
+                category=category,
+                stream_callback=None,
+                history=conversation_history  # NEW: pass history parameter
             )
-            
-            # Return response with sources
             return jsonify({
                 "response": result["answer"],
                 "sources": result["sources"],
@@ -396,23 +397,18 @@ def query():
                 "status": "completed"
             })
         else:
-            # Implement a custom streaming solution that includes status
             def generate_direct_streaming_response():
                 accumulated_response = ""
-                
                 def stream_callback(chunk):
                     nonlocal accumulated_response
                     accumulated_response += chunk
-                    
                 try:
-                    # Get query embedding and search for relevant documents
                     query_embedding = embedding_service.get_embedding(query_text)
                     matched_docs = pinecone_client.query_vectors(
                         query_embedding, 
                         namespace="global_knowledge_base",
                         top_k=5  
                     )
-                    
                     if not matched_docs:
                         return jsonify({
                             "response": "I couldn't find any relevant information in our knowledge base.",
@@ -420,14 +416,11 @@ def query():
                             "streaming": False,
                             "status": "no_results"
                         })
-                    
-                    # Prepare context from matched documents
                     context_text = "\n\n---\n\n".join([doc['text'] for doc in matched_docs])
                     
-                    # Generate full response
-                    rag_system.generate_response(context_text, query_text, stream_callback)
+                    # Pass conversation_history into generate_streaming_response
+                    rag_system.generate_streaming_response(context_text, query_text, stream_callback, conversation_history=conversation_history)
                     
-                    # Prepare source information
                     sources = []
                     for i, doc in enumerate(matched_docs, start=1):
                         sources.append({
@@ -435,14 +428,12 @@ def query():
                             "relevance_score": doc.get('score', 0)
                         })
                     
-                    # Return the complete response with status
                     return jsonify({
                         "response": accumulated_response,
                         "sources": sources,
                         "streaming": False,
                         "status": "completed"
                     })
-                    
                 except Exception as e:
                     logger.error(f"Error in streaming response: {str(e)}", exc_info=True)
                     return jsonify({
@@ -450,13 +441,13 @@ def query():
                         "streaming": False,
                         "status": "error"
                     }), 500
-            
             return generate_direct_streaming_response()
     
     except Exception as e:
         logger.error(f"Query error: {str(e)}")
         traceback.print_exc()
         return jsonify({"error": f"Failed to process query: {str(e)}", "status": "error"}), 500
+
 
 @app.route('/documents', methods=['GET'])
 def list_documents():
