@@ -1,6 +1,6 @@
 // components/library/KnowledgeItem.tsx
 import React from 'react';
-import { FileText, FilePdf } from 'lucide-react';
+import { FileText, File } from 'lucide-react';
 import { KnowledgeItem as KnowledgeItemType } from '../../types';
 import { useAppContext } from '../../contexts/AppContext';
 
@@ -16,7 +16,7 @@ const KnowledgeItem: React.FC<KnowledgeItemProps> = ({ item, onDelete }) => {
   const getFileIcon = (type?: string) => {
     switch (type) {
       case 'pdf':
-        return <FilePdf size={20} className="text-red-500 dark:text-red-400 ml-2 flex-shrink-0" />;
+        return <File size={20} className="text-red-500 dark:text-red-400 ml-2 flex-shrink-0" />;
       case 'doc':
         return <FileText size={20} className="text-blue-500 dark:text-blue-400 ml-2 flex-shrink-0" />;
       default:

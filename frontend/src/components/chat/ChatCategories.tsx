@@ -1,6 +1,6 @@
 // components/chat/ChatCategories.tsx
 import React from 'react';
-import { FileText, FilePdf } from 'lucide-react';
+import { FileText, File } from 'lucide-react';
 import { useAppContext } from '../../contexts/AppContext';
 
 const ChatCategories: React.FC = () => {
@@ -29,7 +29,7 @@ const ChatCategories: React.FC = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center">
                 {category.name === 'Documents' ? (
-                  <FilePdf size={18} className="text-red-600 dark:text-red-500 mr-2" />
+                  <File size={18} className="text-red-600 dark:text-red-500 mr-2" />
                 ) : (
                   <FileText size={18} className="text-blue-500 dark:text-blue-400 mr-2" />
                 )}
