@@ -1,6 +1,6 @@
 // components/integration/IntegrationPanel.tsx
 import React from 'react';
-import WhatsAppIntegration from './WhatsAppIntegration';
+import WhatsAppIntegration from './WhatsappIntegration.tsx';
 import ApiAccess from './ApiAccess';
 
 const IntegrationPanel: React.FC = () => {
