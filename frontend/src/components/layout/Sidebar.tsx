@@ -1,0 +1,119 @@
+// components/layout/Sidebar.tsx
+import React from 'react';
+import { Book, FileText, Plug, ChevronDown, ChevronRight, Plus, MessageSquare } from 'lucide-react';
+import { useAppContext } from '../../contexts/AppContext';
+
+const Sidebar: React.FC = () => {
+  const {
+    sidebarOpen,
+    activeTab,
+    setActiveTab,
+    selectedCategory,
+    setSelectedCategory,
+    categories,
+    setCategories,
+    categoriesOpen,
+    setCategoriesOpen,
+    showNotification
+  } = useAppContext();
+
+  const handleAddCategory = () => {
+    const newCategoryName = prompt("Enter new category name:");
+    if (newCategoryName && newCategoryName.trim()) {
+      const newId = newCategoryName.toLowerCase().replace(/\s+/g, '-');
+      setCategories([...categories, { id: newId, name: newCategoryName.trim() }]);
+      showNotification("Category added");
+    }
+  };
+
+  return (
+    <aside 
+      className={`w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 ${
+        sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+      } lg:translate-x-0 fixed lg:relative z-40 h-[calc(100vh-4rem)]`}
+    >
+      <div className="flex-grow overflow-y-auto py-4 flex flex-col h-full">
+        <nav className="px-4 space-y-1 flex-grow">
+          <button
+            onClick={() => setActiveTab('library')}
+            className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
+              activeTab === 'library' 
+                ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
+                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+            }`}
+          >
+            <Book size={20} className="mr-3" />
+            <span>Library</span>
+          </button>
+          
+          <div className="pt-2">
+            <button
+              onClick={() => setCategoriesOpen(!categoriesOpen)}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
+              <div className="flex items-center">
+                <FileText size={20} className="mr-3" />
+                <span>Hubs</span>
+              </div>
+              {categoriesOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
+            
+            {categoriesOpen && (
+              <div className="ml-6 mt-1 space-y-1">
+                {categories.map(category => (
+                  <button
+                    key={category.id}
+                    onClick={() => {
+                      setSelectedCategory(category.id);
+                      setActiveTab('library');
+                    }}
+                    className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
+                      selectedCategory === category.id && activeTab === 'library'
+                        ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                    }`}
+                  >
+                    <span>{category.name}</span>
+                  </button>
+                ))}
+                
+                <button
+                  className="w-full flex items-center px-3 py-2 rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  onClick={handleAddCategory}
+                >
+                  <Plus size={16} className="mr-2" />
+                  <span>Add Category</span>
+                </button>
+              </div>
+            )}
+          </div>
+          
+          <button
+            onClick={() => setActiveTab('integration')}
+            className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
+              activeTab === 'integration' 
+                ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
+                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+            }`}
+          >
+            <Plug size={20} className="mr-3" />
+            <span>Integration</span>
+          </button>
+        </nav>
+        
+        {/* Chat button at the bottom */}
+        <div className="px-4 mt-auto pb-4">
+          <button
+            onClick={() => setActiveTab('chat')}
+            className="w-full flex items-center px-3 py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
+          >
+            <MessageSquare size={20} className="mr-3" />
+            <span>Chat</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+  );
+};
+
+export default Sidebar;
