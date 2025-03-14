@@ -1,13 +1,14 @@
 // components/layout/Sidebar.tsx
 import React from 'react';
-import { Book, FileText, Plug, ChevronDown, ChevronRight, Plus, MessageSquare } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { Book, FileText, Plug, ChevronDown, ChevronRight, Plus, MessageSquare, LogOut } from 'lucide-react';
 import { useAppContext } from '../../contexts/AppContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 const Sidebar: React.FC = () => {
+  const location = useLocation();
   const {
     sidebarOpen,
-    activeTab,
-    setActiveTab,
     selectedCategory,
     setSelectedCategory,
     categories,
@@ -16,6 +17,12 @@ const Sidebar: React.FC = () => {
     setCategoriesOpen,
     showNotification
   } = useAppContext();
+  
+  const { logout } = useAuth();
+
+  const isActive = (path: string) => {
+    return location.pathname.includes(path);
+  };
 
   const handleAddCategory = () => {
     const newCategoryName = prompt("Enter new category name:");
@@ -34,17 +41,17 @@ const Sidebar: React.FC = () => {
     >
       <div className="flex-grow overflow-y-auto py-4 flex flex-col h-full">
         <nav className="px-4 space-y-1 flex-grow">
-          <button
-            onClick={() => setActiveTab('library')}
+          <Link
+            to="/dashboard/library"
             className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
-              activeTab === 'library' 
+              isActive('/library') 
                 ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
                 : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
             }`}
           >
             <Book size={20} className="mr-3" />
             <span>Library</span>
-          </button>
+          </Link>
           
           <div className="pt-2">
             <button
@@ -65,10 +72,9 @@ const Sidebar: React.FC = () => {
                     key={category.id}
                     onClick={() => {
                       setSelectedCategory(category.id);
-                      setActiveTab('library');
                     }}
                     className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
-                      selectedCategory === category.id && activeTab === 'library'
+                      selectedCategory === category.id && isActive('/library')
                         ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
                         : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
                     }`}
@@ -88,27 +94,35 @@ const Sidebar: React.FC = () => {
             )}
           </div>
           
-          <button
-            onClick={() => setActiveTab('integration')}
+          <Link
+            to="/dashboard/integration"
             className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
-              activeTab === 'integration' 
+              isActive('/integration') 
                 ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
                 : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
             }`}
           >
             <Plug size={20} className="mr-3" />
             <span>Integration</span>
-          </button>
+          </Link>
         </nav>
         
-        {/* Chat button at the bottom */}
-        <div className="px-4 mt-auto pb-4">
-          <button
-            onClick={() => setActiveTab('chat')}
+        {/* Bottom buttons */}
+        <div className="px-4 mt-auto pb-4 space-y-2">
+          <Link
+            to="/dashboard/chat"
             className="w-full flex items-center px-3 py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
           >
             <MessageSquare size={20} className="mr-3" />
             <span>Chat</span>
+          </Link>
+          
+          <button
+            onClick={logout}
+            className="w-full flex items-center px-3 py-2 rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          >
+            <LogOut size={20} className="mr-3" />
+            <span>Logout</span>
           </button>
         </div>
       </div>

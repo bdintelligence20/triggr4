@@ -1,0 +1,188 @@
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { ArrowLeft, Mail, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+
+const forgotPasswordSchema = z.object({
+  email: z.string().email('Please enter a valid email address'),
+});
+
+type ForgotPasswordFormData = z.infer<typeof forgotPasswordSchema>;
+
+const ForgotPassword = () => {
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(0);
+  const navigate = useNavigate();
+
+  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<ForgotPasswordFormData>({
+    resolver: zodResolver(forgotPasswordSchema),
+  });
+
+  // Add useEffect for redirection
+  useEffect(() => {
+    let redirectTimer: NodeJS.Timeout;
+    
+    if (isSubmitted) {
+      redirectTimer = setTimeout(() => {
+        navigate('/reset-password');
+      }, 2000);
+    }
+
+    // Cleanup timer on unmount
+    return () => {
+      if (redirectTimer) {
+        clearTimeout(redirectTimer);
+      }
+    };
+  }, [isSubmitted, navigate]);
+
+  const onSubmit = async (data: ForgotPasswordFormData) => {
+    try {
+      setError(null);
+      
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Demo: Always succeed for test@company.com
+      if (data.email === 'test@company.com') {
+        setIsSubmitted(true);
+        setCooldown(30);
+        
+        // Start cooldown timer
+        const timer = setInterval(() => {
+          setCooldown((prev) => {
+            if (prev <= 1) {
+              clearInterval(timer);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+      } else {
+        setError('Email not found. Please check and try again.');
+      }
+    } catch (err) {
+      setError('An error occurred. Please try again later.');
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="w-full max-w-md mx-auto p-6"
+    >
+      <button
+        onClick={() => navigate('/login')}
+        className="flex items-center text-gray-600 hover:text-gray-900 mb-8"
+      >
+        <ArrowLeft className="mr-2" size={20} />
+        Back to Login
+      </button>
+
+      <div className="text-center mb-8">
+        <h1 className="text-2xl font-bold mb-2">Reset Password</h1>
+        <p className="text-gray-600">
+          Enter your email address and we'll send you instructions to reset your password
+        </p>
+      </div>
+
+      <AnimatePresence mode="wait">
+        {isSubmitted ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="text-center space-y-6"
+          >
+            <div className="bg-emerald-50 text-emerald-600 p-6 rounded-lg">
+              <Mail className="w-12 h-12 mx-auto mb-4" />
+              <h2 className="text-lg font-semibold mb-2">Check Your Email</h2>
+              <p className="text-sm">
+                We've sent password reset instructions to your email address.
+                Please check your inbox.
+              </p>
+              <p className="text-sm mt-4">
+                Redirecting to reset password page in 2 seconds...
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <Button
+                onClick={() => setIsSubmitted(false)}
+                disabled={cooldown > 0}
+                variant="outline"
+                className="w-full"
+              >
+                {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend Instructions'}
+              </Button>
+
+              <Button
+                onClick={() => navigate('/login')}
+                variant="ghost"
+                className="w-full"
+              >
+                Return to Login
+              </Button>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.form
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            onSubmit={handleSubmit(onSubmit)}
+            className="space-y-6"
+          >
+            <div className="space-y-2">
+              <Label htmlFor="email">Email address</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="you@company.com"
+                {...register('email')}
+              />
+              {errors.email && (
+                <p className="text-sm text-red-500">{errors.email.message}</p>
+              )}
+            </div>
+
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-red-50 text-red-500 text-sm p-3 rounded-lg"
+              >
+                {error}
+              </motion.div>
+            )}
+
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sending Instructions...
+                </>
+              ) : (
+                'Send Reset Instructions'
+              )}
+            </Button>
+          </motion.form>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+};
+
+export default ForgotPassword;
