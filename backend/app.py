@@ -11,6 +11,7 @@ from openai import OpenAI
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
 import nltk
+from auth_routes import auth_bp
 
 nltk.download('punkt', quiet=True)
 from nltk.tokenize import sent_tokenize
@@ -120,6 +121,9 @@ app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['ALLOWED_EXTENSIONS'] = {'pdf', 'doc', 'docx', 'txt'}
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Register the auth blueprint
+app.register_blueprint(auth_bp, url_prefix='/auth')
 
 @app.after_request
 def add_cors_headers(response):

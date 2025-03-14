@@ -1,5 +1,3 @@
-// Create a new file: src/services/api.ts
-
 // API base URL - replace with your actual backend URL
 const API_BASE_URL = 'https://triggr4bg.onrender.com';
 
@@ -9,18 +7,34 @@ export interface ApiResponse<T> {
   status: number;
 }
 
-// Generic fetch function with error handling
+// Generic fetch function with error handling and authentication
 async function fetchApi<T>(
   endpoint: string, 
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
+    // Add auth token if available
+    const token = localStorage.getItem('auth_token');
+    const headers = {
+      ...options.headers,
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    };
+    
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
-      headers: {
-        ...options.headers,
-      }
+      headers
     });
+    
+    // Handle 401 Unauthorized by redirecting to login
+    if (response.status === 401) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_email');
+      window.location.href = '/login';
+      return {
+        error: 'Authentication required. Please log in again.',
+        status: 401
+      };
+    }
     
     const data = await response.json();
     
@@ -97,5 +111,66 @@ export async function deleteDocument(itemId: string): Promise<ApiResponse<{messa
 export async function checkHealth(): Promise<ApiResponse<{status: string, services: any}>> {
   return fetchApi<{status: string, services: any}>('/health', {
     method: 'GET',
+  });
+}
+
+// Authentication API functions
+
+// Login
+export async function login(email: string, password: string): Promise<ApiResponse<{token: string, user: any}>> {
+  return fetchApi<{token: string, user: any}>('/auth/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+// Verify OTP
+export async function verifyOTP(otp: string): Promise<ApiResponse<{token: string, user: any}>> {
+  const email = localStorage.getItem('auth_email');
+  return fetchApi<{token: string, user: any}>('/auth/verify-otp', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email, otp }),
+  });
+}
+
+// Forgot password
+export async function forgotPassword(email: string): Promise<ApiResponse<{message: string}>> {
+  return fetchApi<{message: string}>('/auth/forgot-password', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email }),
+  });
+}
+
+// Reset password
+export async function resetPassword(token: string, password: string): Promise<ApiResponse<{message: string}>> {
+  return fetchApi<{message: string}>('/auth/reset-password', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ token, password }),
+  });
+}
+
+// Logout
+export async function logout(): Promise<ApiResponse<{message: string}>> {
+  return fetchApi<{message: string}>('/auth/logout', {
+    method: 'POST',
+  });
+}
+
+// Validate token
+export async function validateToken(): Promise<ApiResponse<any>> {
+  return fetchApi<any>('/auth/validate-token', {
+    method: 'POST',
   });
 }
