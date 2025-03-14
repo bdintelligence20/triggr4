@@ -11,11 +11,12 @@ from firebase_admin import firestore
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize Firestore DB
-db = firestore.client()
-
 # Create a Blueprint for auth routes
 auth_bp = Blueprint('auth', __name__)
+
+# Get Firestore DB client
+def get_db():
+    return firestore.client()
 
 # JWT Secret Key (should be in environment variables in production)
 JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key')
@@ -53,6 +54,7 @@ def login():
     
     try:
         # Query Firestore for the user
+        db = get_db()
         users_ref = db.collection('users')
         query = users_ref.where('email', '==', email).limit(1)
         user_docs = query.stream()
@@ -120,6 +122,7 @@ def validate_token():
     
     try:
         # Get user data from Firestore
+        db = get_db()
         user_id = payload.get('user_id')
         user_doc = db.collection('users').document(user_id).get()
         
@@ -157,6 +160,7 @@ def verify_otp():
     
     try:
         # Query Firestore for the OTP
+        db = get_db()
         otps_ref = db.collection('otps')
         query = otps_ref.where('email', '==', email).where('code', '==', otp).limit(1)
         otp_docs = query.stream()
@@ -171,6 +175,7 @@ def verify_otp():
             return jsonify({'error': 'Invalid OTP'}), 401
         
         # Get or create user
+        # db is already defined above
         users_ref = db.collection('users')
         query = users_ref.where('email', '==', email).limit(1)
         user_docs = query.stream()
@@ -236,6 +241,7 @@ def forgot_password():
     
     try:
         # Check if user exists
+        db = get_db()
         users_ref = db.collection('users')
         query = users_ref.where('email', '==', email).limit(1)
         user_docs = query.stream()
@@ -288,6 +294,7 @@ def reset_password():
         email = payload.get('email')
         
         # Check if token exists in Firestore
+        db = get_db()
         resets_ref = db.collection('password_resets')
         query = resets_ref.where('email', '==', email).where('token', '==', token).limit(1)
         reset_docs = query.stream()
