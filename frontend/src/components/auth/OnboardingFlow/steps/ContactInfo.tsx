@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '../../../ui/Button';
 import { Input } from '../../../ui/Input';
-import { Label } from '../../../ui/Label';
+import { Label } from '../../../ui/label';
 
 const contactSchema = z.object({
   fullName: z.string().min(2, 'Full name is required'),

@@ -7,7 +7,7 @@ import { ArrowLeft, Check, LogIn as WhatsappLogo } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { Label } from '../ui/Label';
+import { Label } from '../ui/label';
 import OnboardingFlow from './OnboardingFlow';
 
 const otpSchema = z.object({
