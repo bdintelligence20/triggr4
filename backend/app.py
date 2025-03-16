@@ -206,10 +206,43 @@ def health_check():
             "error": str(e)
         }), 500
 
+def get_user_organization_id():
+    """Get the organization ID for the authenticated user."""
+    auth_header = request.headers.get('Authorization')
+    
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return None
+    
+    token = auth_header.split(' ')[1]
+    
+    try:
+        # Verify token
+        from auth_routes import verify_token
+        payload = verify_token(token)
+        if not payload:
+            return None
+        
+        user_id = payload.get('user_id')
+        
+        # Get user data from Firestore
+        user_doc = db.collection('users').document(user_id).get()
+        if not user_doc.exists:
+            return None
+        
+        user_data = user_doc.to_dict()
+        return user_data.get('organizationId')
+    except Exception as e:
+        logger.error(f"Error getting user organization ID: {str(e)}")
+        return None
+
 @app.route('/upload', methods=['POST'])
 def upload_document():
     """Upload and process a document for the knowledge base."""
     logger.info("Upload endpoint called")
+    
+    # Get organization ID from authenticated user
+    organization_id = get_user_organization_id()
+    logger.info(f"Upload request for organization: {organization_id or 'global'}")
     
     if 'file' not in request.files:
         logger.info("No file in request")
@@ -270,9 +303,17 @@ def upload_document():
         item_id = doc_ref.id
         logger.info(f"Saved document to Firestore with ID: {item_id}")
 
-        # Skip the rag_system and directly process the document ourselves
-        # to diagnose any potential issues
+        # Skip the global rag_system and create an organization-specific one
         try:
+            # Create organization-specific RAG system
+            org_rag_system = RAGSystem(
+                openai_api_key=OPENAI_API_KEY,
+                anthropic_api_key=ANTHROPIC_API_KEY,
+                pinecone_api_key=PINECONE_API_KEY,
+                index_name=PINECONE_INDEX_NAME,
+                organization_id=organization_id
+            )
+            
             # Manually create chunks
             chunks = chunk_text(content)
             logger.info(f"Split text into {len(chunks)} chunks")
@@ -305,20 +346,23 @@ def upload_document():
                 }
                 vectors.append((vector_id, embedding, metadata))
             
-            # Store vectors directly in Pinecone
+            # Store vectors directly in Pinecone with organization namespace
             batch_size = 10
             for i in range(0, len(vectors), batch_size):
                 batch = vectors[i:i+batch_size]
                 logger.info(f"Upserting batch {i//batch_size + 1} to Pinecone")
+                
+                # Use the organization-specific namespace
+                namespace = f"org_{organization_id}" if organization_id else "global_knowledge_base"
                 
                 # Direct Pinecone upsert with retries
                 for attempt in range(3):
                     try:
                         pinecone_client.index.upsert(
                             vectors=batch,
-                            namespace="global_knowledge_base"
+                            namespace=namespace
                         )
-                        logger.info(f"Successfully upserted batch {i//batch_size + 1}")
+                        logger.info(f"Successfully upserted batch {i//batch_size + 1} to namespace: {namespace}")
                         break
                     except Exception as e:
                         logger.error(f"Pinecone upsert error (attempt {attempt+1}): {str(e)}")
@@ -327,10 +371,11 @@ def upload_document():
                         import time
                         time.sleep(1)  # Wait before retrying
             
-            # Update status
+            # Update status with organization info
             doc_ref.update({
                 "processing_status": "completed",
-                "vectors_stored": len(vectors)
+                "vectors_stored": len(vectors),
+                "organizationId": organization_id
             })
             
             logger.info(f"Successfully processed document {item_id}: {len(vectors)} vectors stored")
@@ -367,9 +412,12 @@ def query():
     query_text = data.get("query")
     category = data.get("category")
     stream_enabled = data.get("stream", False)
-    conversation_history = data.get("history", "")  # NEW: read history field
-
-    logger.info(f"Query received: '{query_text}', category: '{category}', stream: {stream_enabled}")
+    conversation_history = data.get("history", "")
+    
+    # Get organization ID from authenticated user
+    organization_id = get_user_organization_id()
+    
+    logger.info(f"Query received: '{query_text}', category: '{category}', stream: {stream_enabled}, organization: {organization_id or 'global'}")
     
     if not query_text or not isinstance(query_text, str) or len(query_text.strip()) < 2:
         return jsonify({"error": "Invalid or empty query"}), 400
@@ -381,18 +429,28 @@ def query():
             "timestamp": firestore.SERVER_TIMESTAMP,
             "client_ip": request.remote_addr,
             "stream_enabled": stream_enabled,
-            "history": conversation_history  # Optionally log history
+            "history": conversation_history,
+            "organizationId": organization_id
         })
+        
+        # Create organization-specific RAG system
+        org_rag_system = RAGSystem(
+            openai_api_key=OPENAI_API_KEY,
+            anthropic_api_key=ANTHROPIC_API_KEY,
+            pinecone_api_key=PINECONE_API_KEY,
+            index_name=PINECONE_INDEX_NAME,
+            organization_id=organization_id
+        )
         
         if not stream_enabled:
             # Pass conversation history to the RAG system
-            result = rag_system.query(
+            result = org_rag_system.query(
                 query_text, 
-                namespace="global_knowledge_base",
+                namespace=None,  # Will use organization namespace internally
                 top_k=5,
                 category=category,
                 stream_callback=None,
-                history=conversation_history  # NEW: pass history parameter
+                history=conversation_history
             )
             return jsonify({
                 "response": result["answer"],
@@ -407,10 +465,18 @@ def query():
                     nonlocal accumulated_response
                     accumulated_response += chunk
                 try:
-                    query_embedding = embedding_service.get_embedding(query_text)
-                    matched_docs = pinecone_client.query_vectors(
+                    # Use organization-specific embedding service and pinecone client
+                    org_embedding_service = EmbeddingService(api_key=OPENAI_API_KEY)
+                    org_pinecone_client = PineconeClient(
+                        api_key=PINECONE_API_KEY, 
+                        index_name=PINECONE_INDEX_NAME,
+                        organization_id=organization_id
+                    )
+                    
+                    query_embedding = org_embedding_service.get_embedding(query_text)
+                    matched_docs = org_pinecone_client.query_vectors(
                         query_embedding, 
-                        namespace="global_knowledge_base",
+                        namespace=None,  # Will use organization namespace internally
                         top_k=5  
                     )
                     if not matched_docs:
@@ -423,7 +489,7 @@ def query():
                     context_text = "\n\n---\n\n".join([doc['text'] for doc in matched_docs])
                     
                     # Pass conversation_history into generate_streaming_response
-                    rag_system.generate_streaming_response(context_text, query_text, stream_callback, conversation_history=conversation_history)
+                    org_rag_system.generate_streaming_response(context_text, query_text, stream_callback, conversation_history=conversation_history)
                     
                     sources = []
                     for i, doc in enumerate(matched_docs, start=1):
@@ -460,10 +526,19 @@ def list_documents():
         category = request.args.get('category')
         limit = min(int(request.args.get('limit', 100)), 500)  # Cap at 500
         
+        # Get organization ID from authenticated user
+        organization_id = get_user_organization_id()
+        
         # Build query
         query = db.collection("knowledge_items")
+        
+        # Apply filters
         if category:
             query = query.where("category", "==", category)
+            
+        # Filter by organization if available
+        if organization_id:
+            query = query.where("organizationId", "==", organization_id)
         
         # Execute query
         docs = query.limit(limit).stream()
@@ -509,6 +584,9 @@ def delete_document(item_id):
             
         doc_data = doc.to_dict()
         
+        # Get organization ID from the document or from the authenticated user
+        organization_id = doc_data.get("organizationId") or get_user_organization_id()
+        
         # First collect all vector IDs for this document
         vector_ids = []
         
@@ -519,7 +597,7 @@ def delete_document(item_id):
         for i in range(max(100, expected_chunks * 2)):  # Search for more than we expect to be safe
             vector_ids.append(f"{item_id}_{i}")
         
-        logger.info(f"Attempting to delete up to {len(vector_ids)} vectors for document {item_id}")
+        logger.info(f"Attempting to delete up to {len(vector_ids)} vectors for document {item_id} in organization: {organization_id or 'global'}")
         
         # Delete in batches to avoid hitting limits
         batch_size = 100
@@ -528,9 +606,12 @@ def delete_document(item_id):
         for i in range(0, len(vector_ids), batch_size):
             batch = vector_ids[i:i+batch_size]
             try:
+                # Use the organization-specific namespace
+                namespace = f"org_{organization_id}" if organization_id else "global_knowledge_base"
+                
                 result = pinecone_client.index.delete(
                     ids=batch,
-                    namespace="global_knowledge_base"
+                    namespace=namespace
                 )
                 vectors_deleted += len(batch)
                 logger.info(f"Deleted batch of {len(batch)} vectors for document {item_id}")

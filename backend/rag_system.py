@@ -39,11 +39,12 @@ def re_rank_matched_docs(query: str, matched_docs: List[Dict[str, Any]]) -> List
     return ranked_docs
 
 class RAGSystem:
-    def __init__(self, openai_api_key=None, anthropic_api_key=None, pinecone_api_key=None, index_name="knowledge-hub-vectors"):
+    def __init__(self, openai_api_key=None, anthropic_api_key=None, pinecone_api_key=None, index_name="knowledge-hub-vectors", organization_id=None):
         """Initialize the RAG system with necessary components."""
         self.openai_api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
         self.anthropic_api_key = anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
         self.pinecone_api_key = pinecone_api_key or os.environ.get("PINECONE_API_KEY")
+        self.organization_id = organization_id
         
         if not all([self.openai_api_key, self.anthropic_api_key, self.pinecone_api_key]):
             missing = []
@@ -53,12 +54,16 @@ class RAGSystem:
             raise ValueError(f"Missing API keys: {', '.join(missing)}")
         
         self.embedding_service = EmbeddingService(api_key=self.openai_api_key)
-        self.pinecone_client = PineconeClient(api_key=self.pinecone_api_key, index_name=index_name)
+        self.pinecone_client = PineconeClient(
+            api_key=self.pinecone_api_key, 
+            index_name=index_name,
+            organization_id=organization_id
+        )
         self.anthropic_client = anthropic.Client(api_key=self.anthropic_api_key)
         
-        logger.info("RAG system initialized successfully")
+        logger.info(f"RAG system initialized successfully for organization: {organization_id or 'global'}")
         
-    def process_document(self, doc_text, source_id, namespace="global_knowledge_base"):
+    def process_document(self, doc_text, source_id, namespace=None):
         """Process a document and store it in the vector database."""
         logger.info(f"Processing document: {source_id}")
         
@@ -82,7 +87,7 @@ class RAGSystem:
         
         return vectors_stored
         
-    def query(self, user_query, namespace="global_knowledge_base", top_k=5, category=None, stream_callback=None, history=""):
+    def query(self, user_query, namespace=None, top_k=5, category=None, stream_callback=None, history=""):
         """
         Query the system with a user question and return an AI response using retrieved context.
         The optional 'history' parameter is used to include conversation context for follow-up questions.
@@ -246,4 +251,3 @@ class RAGSystem:
                 else:
                     callback("\n\nI'm sorry, I encountered an error while generating a response. Please try again.")
                     raise
-

@@ -10,6 +10,9 @@ interface User {
   fullName: string;
   photoUrl?: string;
   role: string;
+  organizationId?: string;
+  organizationName?: string;
+  organizationRole?: string;
 }
 
 interface AuthContextType {

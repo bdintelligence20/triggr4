@@ -50,6 +50,9 @@ const LoginForm = () => {
         <p className="text-sm text-gray-500 mt-2">
           Sign in to your account to continue
         </p>
+        <p className="text-sm text-emerald-500 mt-2">
+          New user? Enter your email and password to register
+        </p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
@@ -110,7 +113,7 @@ const LoginForm = () => {
             className="w-full"
             disabled={isSubmitting}
           >
-            {isSubmitting ? 'Signing in...' : 'Sign in'}
+            {isSubmitting ? 'Signing in...' : 'Sign in / Register'}
           </Button>
 
           <Button

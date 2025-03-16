@@ -98,7 +98,10 @@ def login():
                 'email': user_data['email'],
                 'fullName': user_data.get('fullName', 'User'),
                 'photoUrl': user_data.get('photoUrl'),
-                'role': user_data.get('role', 'user')
+                'role': user_data.get('role', 'user'),
+                'organizationId': user_data.get('organizationId'),
+                'organizationName': user_data.get('organizationName'),
+                'organizationRole': user_data.get('organizationRole', 'member')
             }
         })
         
@@ -141,7 +144,10 @@ def validate_token():
             'email': user_data.get('email'),
             'fullName': user_data.get('fullName', 'User'),
             'photoUrl': user_data.get('photoUrl'),
-            'role': user_data.get('role', 'user')
+            'role': user_data.get('role', 'user'),
+            'organizationId': user_data.get('organizationId'),
+            'organizationName': user_data.get('organizationName'),
+            'organizationRole': user_data.get('organizationRole', 'member')
         })
         
     except Exception as e:
@@ -194,7 +200,10 @@ def verify_otp():
                 'email': email,
                 'fullName': email.split('@')[0].title(),
                 'role': 'user',
-                'createdAt': firestore.SERVER_TIMESTAMP
+                'createdAt': firestore.SERVER_TIMESTAMP,
+                'organizationId': None,  # Will be set during onboarding
+                'organizationName': None,
+                'organizationRole': 'admin'  # First user is admin by default
             }
             user_ref = users_ref.document()
             user_ref.set(new_user)
@@ -215,7 +224,10 @@ def verify_otp():
                 'email': email,
                 'fullName': user_data.get('fullName', 'User'),
                 'photoUrl': user_data.get('photoUrl'),
-                'role': user_data.get('role', 'user')
+                'role': user_data.get('role', 'user'),
+                'organizationId': user_data.get('organizationId'),
+                'organizationName': user_data.get('organizationName'),
+                'organizationRole': user_data.get('organizationRole', 'member')
             }
         })
         
@@ -274,6 +286,69 @@ def forgot_password():
     except Exception as e:
         logger.error(f"Forgot password error: {str(e)}")
         return jsonify({'error': 'An error occurred while processing your request'}), 500
+
+@auth_bp.route('/create-organization', methods=['POST'])
+def create_organization():
+    """Create a new organization and associate it with the user."""
+    auth_header = request.headers.get('Authorization')
+    
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({'error': 'Authorization header is required'}), 401
+    
+    token = auth_header.split(' ')[1]
+    payload = verify_token(token)
+    
+    if not payload:
+        return jsonify({'error': 'Invalid or expired token'}), 401
+    
+    data = request.get_json()
+    organization_name = data.get('organizationName')
+    industry = data.get('industry')
+    organization_size = data.get('organizationSize')
+    
+    if not organization_name:
+        return jsonify({'error': 'Organization name is required'}), 400
+    
+    try:
+        db = get_db()
+        user_id = payload.get('user_id')
+        
+        # Create a new organization
+        org_data = {
+            'name': organization_name,
+            'industry': industry,
+            'size': organization_size,
+            'createdAt': firestore.SERVER_TIMESTAMP,
+            'createdBy': user_id,
+            'members': [user_id],
+            'admins': [user_id]
+        }
+        
+        org_ref = db.collection('organizations').document()
+        org_ref.set(org_data)
+        org_id = org_ref.id
+        
+        # Update the user with organization info
+        user_ref = db.collection('users').document(user_id)
+        user_ref.update({
+            'organizationId': org_id,
+            'organizationName': organization_name,
+            'organizationRole': 'admin',
+            'updatedAt': firestore.SERVER_TIMESTAMP
+        })
+        
+        # Create organization-specific Pinecone namespace
+        # This is handled by the backend when documents are uploaded
+        
+        return jsonify({
+            'message': 'Organization created successfully',
+            'organizationId': org_id,
+            'organizationName': organization_name
+        })
+        
+    except Exception as e:
+        logger.error(f"Organization creation error: {str(e)}")
+        return jsonify({'error': 'An error occurred while creating the organization'}), 500
 
 @auth_bp.route('/reset-password', methods=['POST'])
 def reset_password():

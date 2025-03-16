@@ -8,11 +8,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class PineconeClient:
-    def __init__(self, api_key, index_name, dimension=3072):
+    def __init__(self, api_key, index_name, dimension=3072, organization_id=None):
         """Initialize Pinecone client with retries."""
         self.api_key = api_key
         self.index_name = index_name
         self.dimension = dimension
+        self.organization_id = organization_id
         self.pc = None
         self.index = None
         self.initialize_with_retry()
@@ -53,7 +54,20 @@ class PineconeClient:
                     logger.error("Max retries reached. Failed to initialize Pinecone.")
                     raise
 
-    def store_vectors(self, source_id, chunks, embeddings, namespace="global_knowledge_base", batch_size=10):
+    def get_namespace(self, custom_namespace=None):
+        """
+        Get the appropriate namespace based on organization_id.
+        If organization_id is provided, use it as the namespace.
+        Otherwise, use the provided custom_namespace or default to global.
+        """
+        if self.organization_id:
+            return f"org_{self.organization_id}"
+        elif custom_namespace:
+            return custom_namespace
+        else:
+            return "global_knowledge_base"
+
+    def store_vectors(self, source_id, chunks, embeddings, namespace=None, batch_size=10):
         """Store embeddings and chunks in Pinecone with batching and retries."""
         if not self.index:
             raise ValueError("Pinecone index not initialized")
@@ -65,7 +79,10 @@ class PineconeClient:
         max_retries = 3
         total_vectors = 0
         
-        logger.info(f"Preparing to store {len(chunks)} vectors for source: {source_id}")
+        # Get the appropriate namespace
+        effective_namespace = self.get_namespace(namespace)
+        
+        logger.info(f"Preparing to store {len(chunks)} vectors for source: {source_id} in namespace: {effective_namespace}")
         
         try:
             for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
@@ -83,7 +100,7 @@ class PineconeClient:
                     for retry in range(max_retries):
                         try:
                             logger.info(f"Upserting batch of {len(vectors_to_upsert)} vectors (batch {i//batch_size + 1})")
-                            self.index.upsert(vectors=vectors_to_upsert, namespace=namespace)
+                            self.index.upsert(vectors=vectors_to_upsert, namespace=effective_namespace)
                             total_vectors += len(vectors_to_upsert)
                             vectors_to_upsert = []  # Clear the batch
                             time.sleep(0.5)  # Small delay between batches
@@ -105,23 +122,26 @@ class PineconeClient:
             # Try to upsert any remaining vectors
             if vectors_to_upsert:
                 try:
-                    self.index.upsert(vectors=vectors_to_upsert, namespace=namespace)
+                    self.index.upsert(vectors=vectors_to_upsert, namespace=effective_namespace)
                     total_vectors += len(vectors_to_upsert)
                 except Exception as e:
                     logger.error(f"Error upserting final batch: {str(e)}")
             
             return total_vectors
     
-    def query_vectors(self, query_embedding, namespace="global_knowledge_base", top_k=5, filter_dict=None):
+    def query_vectors(self, query_embedding, namespace=None, top_k=5, filter_dict=None):
         """Query Pinecone for the most similar vectors with retry logic and better filtering."""
         if not self.index:
             raise ValueError("Pinecone index not initialized")
             
         max_retries = 3
         
+        # Get the appropriate namespace
+        effective_namespace = self.get_namespace(namespace)
+        
         for attempt in range(max_retries):
             try:
-                logger.info(f"Querying Pinecone (attempt {attempt+1}) with namespace: '{namespace}', filter: {filter_dict}")
+                logger.info(f"Querying Pinecone (attempt {attempt+1}) with namespace: '{effective_namespace}', filter: {filter_dict}")
                 
                 # Increase top_k to get more candidates for relevance filtering
                 fetch_k = min(top_k * 3, 20)  # Get more candidates but cap at 20
@@ -130,7 +150,7 @@ class PineconeClient:
                 results = self.index.query(
                     vector=query_embedding,
                     top_k=fetch_k,  # Get more candidates
-                    namespace=namespace,
+                    namespace=effective_namespace,
                     include_metadata=True,
                     filter=filter_dict
                 )

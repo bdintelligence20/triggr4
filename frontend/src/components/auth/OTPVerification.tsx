@@ -96,6 +96,11 @@ const OTPVerification = () => {
         <p className="text-gray-600">
           Enter the 6-digit code we sent to your email/WhatsApp
         </p>
+        <p className="text-sm text-emerald-500 mt-2">
+          {localStorage.getItem('auth_email') ? 
+            `Completing verification for ${localStorage.getItem('auth_email')}` : 
+            'This step completes your registration if you are a new user'}
+        </p>
       </div>
 
       <AnimatePresence mode="wait">
@@ -110,8 +115,10 @@ const OTPVerification = () => {
               <Check className="w-12 h-12 mx-auto mb-4" />
               <h2 className="text-lg font-semibold mb-2">Verification Successful</h2>
               <p className="text-sm">
-                Your identity has been verified.
-                Setting up your account...
+                {localStorage.getItem('auth_email') ? 
+                  `Your account for ${localStorage.getItem('auth_email')} has been created or verified.` : 
+                  'Your account has been created or verified.'}
+                <br />Setting up your account...
               </p>
             </div>
           </motion.div>

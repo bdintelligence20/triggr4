@@ -168,6 +168,21 @@ export async function logout(): Promise<ApiResponse<{message: string}>> {
   });
 }
 
+// Create organization
+export async function createOrganization(
+  organizationName: string,
+  industry: string,
+  organizationSize: string
+): Promise<ApiResponse<{organizationId: string, organizationName: string}>> {
+  return fetchApi<{organizationId: string, organizationName: string}>('/auth/create-organization', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ organizationName, industry, organizationSize }),
+  });
+}
+
 // Validate token
 export async function validateToken(): Promise<ApiResponse<any>> {
   return fetchApi<any>('/auth/validate-token', {

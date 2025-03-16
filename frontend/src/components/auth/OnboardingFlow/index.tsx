@@ -3,11 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import ProfileSetup from './steps/ProfileSetup';
 import ContactInfo from './steps/ContactInfo';
+import OrganizationSetup from './steps/OrganizationSetup';
 import HubPermissions from './steps/HubPermissions';
 import OnboardingVideo from './steps/OnboardingVideo';
 import useRoleStore from '../../../store/roleStore';
 
-type OnboardingStep = 'profile' | 'contact' | 'hubs' | 'video';
+type OnboardingStep = 'profile' | 'contact' | 'organization' | 'hubs' | 'video';
 
 const OnboardingFlow = () => {
   const [currentStep, setCurrentStep] = useState<OnboardingStep>('profile');
@@ -16,6 +17,9 @@ const OnboardingFlow = () => {
     fullName: '',
     email: '',
     whatsapp: '',
+    organizationName: '',
+    organizationSize: '',
+    industry: '',
   });
   const navigate = useNavigate();
   const { setRole } = useRoleStore();
@@ -30,6 +34,9 @@ const OnboardingFlow = () => {
         setCurrentStep('contact');
         break;
       case 'contact':
+        setCurrentStep('organization');
+        break;
+      case 'organization':
         setCurrentStep('hubs');
         break;
       case 'hubs':
@@ -77,6 +84,19 @@ const OnboardingFlow = () => {
             </motion.div>
           )}
 
+          {currentStep === 'organization' && (
+            <motion.div
+              key="organization"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
+              <OrganizationSetup 
+                onComplete={(data) => handleStepComplete('organization', data)} 
+              />
+            </motion.div>
+          )}
+
           {currentStep === 'hubs' && (
             <motion.div
               key="hubs"
@@ -105,13 +125,13 @@ const OnboardingFlow = () => {
 
         {/* Progress Indicator */}
         <div className="mt-8 flex justify-center gap-2">
-          {(['profile', 'contact', 'hubs', 'video'] as const).map((step, index) => (
+          {(['profile', 'contact', 'organization', 'hubs', 'video'] as const).map((step, index) => (
             <div
               key={step}
               className={`w-2 h-2 rounded-full transition-colors ${
                 currentStep === step
                   ? 'bg-emerald-400'
-                  : index < ['profile', 'contact', 'hubs', 'video'].indexOf(currentStep)
+                  : index < ['profile', 'contact', 'organization', 'hubs', 'video'].indexOf(currentStep)
                   ? 'bg-emerald-200'
                   : 'bg-gray-200'
               }`}
