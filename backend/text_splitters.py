@@ -1,5 +1,5 @@
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
 from typing import List, Dict, Any, Optional
 import logging
 
@@ -33,7 +33,7 @@ class EnhancedTextSplitter:
     @staticmethod
     def create_hierarchical_chunks(documents: List[Document]) -> List[Document]:
         """Create hierarchical chunks (parent/child relationships)."""
-        from langchain.text_splitter import RecursiveCharacterTextSplitter, HeaderType
+        from langchain_text_splitters import RecursiveCharacterTextSplitter, HeaderType
         
         # First split by headers
         header_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(

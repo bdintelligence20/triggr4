@@ -1,15 +1,15 @@
-from langchain.schema import Document
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.chat_models import ChatOpenAI, ChatAnthropic
-from langchain.retrievers import ContextualCompressionRetriever
-from langchain.retrievers.document_compressors import CohereRerank
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
-from langchain.prompts import PromptTemplate
+from langchain_core.documents import Document
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.chat_models import ChatOpenAI, ChatAnthropic
+from langchain_community.retrievers import ContextualCompressionRetriever
+from langchain_community.retrievers.document_compressors import CohereRerank
+from langchain_community.chains import ConversationalRetrievalChain
+from langchain_core.memory import ConversationBufferMemory
+from langchain_core.prompts import PromptTemplate
 from typing import List, Dict, Any, Optional, Callable
 import logging
 import os
-from .vector_store import EnhancedPineconeStore
+from vector_store import EnhancedPineconeStore
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +54,11 @@ class LangChainRAG:
     
     def process_document(self, file_path: str, source_id: str, category: str = "general") -> int:
         """Process a document and add it to the vector store."""
-        from .document_loaders import DocumentLoaderFactory
-        from .text_splitters import EnhancedTextSplitter
+        import document_loaders
+        import text_splitters
+        
+        DocumentLoaderFactory = document_loaders.DocumentLoaderFactory
+        EnhancedTextSplitter = text_splitters.EnhancedTextSplitter
         
         logger.info(f"Processing document: {source_id}")
         
