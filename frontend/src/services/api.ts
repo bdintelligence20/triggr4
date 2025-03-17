@@ -116,6 +116,17 @@ export async function checkHealth(): Promise<ApiResponse<{status: string, servic
 
 // Authentication API functions
 
+// Register
+export async function register(email: string, password: string, fullName?: string): Promise<ApiResponse<{token: string, user: any}>> {
+  return fetchApi<{token: string, user: any}>('/auth/register', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email, password, fullName }),
+  });
+}
+
 // Login
 export async function login(email: string, password: string): Promise<ApiResponse<{token: string, user: any}>> {
   return fetchApi<{token: string, user: any}>('/auth/login', {
@@ -124,18 +135,6 @@ export async function login(email: string, password: string): Promise<ApiRespons
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ email, password }),
-  });
-}
-
-// Verify OTP
-export async function verifyOTP(otp: string): Promise<ApiResponse<{token: string, user: any}>> {
-  const email = localStorage.getItem('auth_email');
-  return fetchApi<{token: string, user: any}>('/auth/verify-otp', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ email, otp }),
   });
 }
 

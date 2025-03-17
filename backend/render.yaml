@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: knowledge-hub-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --config gunicorn_config.py app:app
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: FIREBASE_CRED_B64
+        sync: false
+      - key: GCS_CRED_B64
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: COHERE_API_KEY
+        sync: false

@@ -8,6 +8,7 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/label';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 
 const loginSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -20,6 +21,7 @@ const LoginForm = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -28,11 +30,14 @@ const LoginForm = () => {
   const onSubmit = async (data: LoginFormData) => {
     try {
       setError(null);
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Navigate to OTP verification
-      navigate('/verify');
+      // Login with Firebase Authentication
+      const success = await login(data.email, data.password);
+      
+      if (success) {
+        // Navigate to dashboard
+        navigate('/dashboard');
+      }
     } catch (err) {
       setError('Invalid credentials. Please try again.');
     }
@@ -51,7 +56,7 @@ const LoginForm = () => {
           Sign in to your account to continue
         </p>
         <p className="text-sm text-emerald-500 mt-2">
-          New user? Enter your email and password to register
+          New user? <a href="/register" className="underline">Create an account</a>
         </p>
       </div>
 
@@ -113,7 +118,7 @@ const LoginForm = () => {
             className="w-full"
             disabled={isSubmitting}
           >
-            {isSubmitting ? 'Signing in...' : 'Sign in / Register'}
+            {isSubmitting ? 'Signing in...' : 'Sign in'}
           </Button>
 
           <Button

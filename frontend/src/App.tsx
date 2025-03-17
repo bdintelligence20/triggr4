@@ -5,6 +5,7 @@ import { AppProvider } from './contexts/AppContext';
 import { AuthProvider } from './contexts/AuthContext';
 import Dashboard from './components/layout/Dashboard';
 import LoginLayout from './components/auth/LoginLayout';
+import RegisterLayout from './components/auth/RegisterLayout';
 import ForgotPassword from './components/auth/ForgotPassword';
 import OTPVerification from './components/auth/OTPVerification';
 import ResetPassword from './components/auth/ResetPassword';
@@ -24,6 +25,7 @@ const App: React.FC = () => {
           <Routes>
             {/* Public Routes */}
             <Route path="/login" element={<LoginLayout />} />
+            <Route path="/register" element={<RegisterLayout />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/verify" element={<OTPVerification />} />
             <Route path="/reset-password/:token" element={<ResetPassword />} />

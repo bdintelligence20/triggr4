@@ -20,9 +20,9 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
+  register: (email: string, password: string, fullName?: string) => Promise<boolean>;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
-  verifyOTP: (otp: string) => Promise<boolean>;
   forgotPassword: (email: string) => Promise<boolean>;
   resetPassword: (token: string, password: string) => Promise<boolean>;
 }
@@ -93,6 +93,46 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     checkAuthStatus();
   }, [setRole, role]);
 
+  const register = async (email: string, password: string, fullName?: string): Promise<boolean> => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      // Call the register API
+      const response = await api.register(email, password, fullName);
+      
+      if (response.error) {
+        throw new Error(response.error);
+      }
+      
+      if (response.data) {
+        // Set user data from response
+        const userData = response.data.user;
+        setUser({
+          id: userData.id || '1',
+          email: userData.email || email,
+          fullName: userData.fullName || fullName || email.split('@')[0],
+          photoUrl: userData.photoUrl,
+          role: userData.role || 'user'
+        });
+        setRole(userData.role || 'user');
+        
+        // Store token
+        localStorage.setItem('auth_token', response.data.token);
+        localStorage.setItem('auth_email', email);
+        return true;
+      } else {
+        throw new Error('Registration failed');
+      }
+    } catch (err) {
+      console.error('Registration failed:', err);
+      setError(err instanceof Error ? err.message : 'Registration failed. Please try again.');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
       setIsLoading(true);
@@ -106,6 +146,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
       
       if (response.data) {
+        // Set user data from response
+        const userData = response.data.user;
+        setUser({
+          id: userData.id || '1',
+          email: userData.email || email,
+          fullName: userData.fullName || email.split('@')[0],
+          photoUrl: userData.photoUrl,
+          role: userData.role || 'user',
+          organizationId: userData.organizationId,
+          organizationName: userData.organizationName,
+          organizationRole: userData.organizationRole
+        });
+        setRole(userData.role || 'user');
+        
+        // Store token
         localStorage.setItem('auth_token', response.data.token);
         localStorage.setItem('auth_email', email);
         return true;
@@ -114,51 +169,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (email === 'test@example.com' && password === 'Password123!') {
           localStorage.setItem('auth_token', 'dummy_token');
           localStorage.setItem('auth_email', email);
-          return true;
-        } else {
-          throw new Error('Invalid credentials');
-        }
-      }
-    } catch (err) {
-      console.error('Login failed:', err);
-      setError(err instanceof Error ? err.message : 'Login failed. Please check your credentials.');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const verifyOTP = async (otp: string): Promise<boolean> => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      
-      // Call the verifyOTP API
-      const response = await api.verifyOTP(otp);
-      
-      if (response.error) {
-        throw new Error(response.error);
-      }
-      
-      if (response.data) {
-        // Set user data from response
-        const userData = response.data.user;
-        setUser({
-          id: userData.id || '1',
-          email: userData.email || localStorage.getItem('auth_email') || 'user@example.com',
-          fullName: userData.fullName || 'Test User',
-          photoUrl: userData.photoUrl,
-          role: userData.role || 'user'
-        });
-        setRole(userData.role || 'user');
-        
-        // Store token
-        localStorage.setItem('auth_token', response.data.token);
-        return true;
-      } else {
-        // Fallback for demo purposes
-        if (otp === '123456') {
-          const email = localStorage.getItem('auth_email') || 'user@example.com';
           setUser({
             id: '1',
             email,
@@ -168,12 +178,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setRole('user');
           return true;
         } else {
-          throw new Error('Invalid OTP');
+          throw new Error('Invalid credentials');
         }
       }
     } catch (err) {
-      console.error('OTP verification failed:', err);
-      setError(err instanceof Error ? err.message : 'OTP verification failed. Please try again.');
+      console.error('Login failed:', err);
+      setError(err instanceof Error ? err.message : 'Login failed. Please check your credentials.');
       return false;
     } finally {
       setIsLoading(false);
@@ -257,9 +267,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     isAuthenticated: !!user,
     isLoading,
     error,
+    register,
     login,
     logout,
-    verifyOTP,
     forgotPassword,
     resetPassword
   };
