@@ -1,6 +1,5 @@
 from langchain.schema import Document
 from langchain_openai import OpenAIEmbeddings
-from langchain_community.chat_models import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import CohereRerank
@@ -11,8 +10,26 @@ from typing import List, Dict, Any, Optional, Callable
 import logging
 import os
 from vector_store import EnhancedPineconeStore
+import anthropic
 
 logger = logging.getLogger(__name__)
+
+# Custom ChatAnthropic class that adds the missing count_tokens method
+class CustomChatAnthropic(ChatAnthropic):
+    """Custom ChatAnthropic class that adds a count_tokens method."""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Add a simple count_tokens method that estimates token count
+        # This is a workaround for the missing method in the Anthropic client
+        self.client.count_tokens = self._estimate_tokens
+    
+    def _estimate_tokens(self, text):
+        """Estimate token count using a simple heuristic.
+        
+        This is a rough approximation - Claude uses ~4 chars per token on average.
+        """
+        return len(text) // 4
 
 class LangChainRAG:
     """Advanced RAG system using LangChain."""
@@ -37,8 +54,8 @@ class LangChainRAG:
             openai_api_key=self.openai_api_key
         )
         
-        # Initialize LLM
-        self.llm = ChatAnthropic(
+        # Initialize LLM with our custom wrapper
+        self.llm = CustomChatAnthropic(
             model="claude-3-7-sonnet-20250219",
             anthropic_api_key=self.anthropic_api_key,
             temperature=1
