@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "routes": [
+    {
+      "src": "^/register/?$",
+      "dest": "/index.html"
+    },
+    {
+      "src": "^/login/?$",
+      "dest": "/index.html"
+    },
+    {
+      "src": "^/dashboard/?.*$",
+      "dest": "/index.html"
+    },
+    {
+      "src": "^/onboarding/?$",
+      "dest": "/index.html"
+    },
+    {
+      "src": "^/forgot-password/?$",
+      "dest": "/index.html"
+    },
+    {
+      "src": "^/reset-password/?.*$",
+      "dest": "/index.html"
+    },
+    {
+      "src": "^/verify/?$",
+      "dest": "/index.html"
+    },
+    {
+      "src": "^/static/(.*)",
+      "dest": "/static/$1"
+    },
+    {
+      "src": "^/assets/(.*)",
+      "dest": "/assets/$1"
+    },
+    {
+      "src": "^/favicon.ico$",
+      "dest": "/favicon.ico"
+    },
+    {
+      "src": "^/.*$",
+      "dest": "/index.html"
+    }
+  ],
+  "error_page": "/index.html"
+}
