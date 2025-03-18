@@ -1,8 +1,8 @@
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.chat_models import ChatOpenAI, ChatAnthropic
-from langchain_core.retrievers import ContextualCompressionRetriever
-from langchain_community.retrievers.document_compressors import CohereRerank
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import CohereRerank
 from langchain_community.chains import ConversationalRetrievalChain
 from langchain_core.memory import ConversationBufferMemory
 from langchain_core.prompts import PromptTemplate
