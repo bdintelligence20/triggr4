@@ -1,8 +1,5 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { Eye, EyeOff, MapIcon as WhatsappIcon } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -10,31 +7,81 @@ import { Label } from '../ui/label';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
-const loginSchema = z.object({
-  email: z.string().min(1, 'Email is required').email('Please enter a valid email address').trim(),
-  password: z.string().min(1, 'Password is required').min(8, 'Password must be at least 8 characters').trim(),
-});
-
-type LoginFormData = z.infer<typeof loginSchema>;
+interface LoginFormData {
+  email: string;
+  password: string;
+}
 
 const LoginForm = () => {
+  const [formData, setFormData] = useState<LoginFormData>({
+    email: '',
+    password: ''
+  });
+  const [errors, setErrors] = useState<{
+    email?: string;
+    password?: string;
+  }>({});
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
   const navigate = useNavigate();
   const { login } = useAuth();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginFormData>({
-    resolver: zodResolver(loginSchema),
-  });
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    
+    // Clear error when user types
+    if (errors[name as keyof typeof errors]) {
+      setErrors(prev => ({
+        ...prev,
+        [name]: undefined
+      }));
+    }
+  };
 
-  const onSubmit = async (data: LoginFormData) => {
+  const validateForm = (): boolean => {
+    const newErrors: {
+      email?: string;
+      password?: string;
+    } = {};
+    
+    // Validate email
+    if (!formData.email.trim()) {
+      newErrors.email = 'Email is required';
+    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      newErrors.email = 'Please enter a valid email address';
+    }
+    
+    // Validate password
+    if (!formData.password.trim()) {
+      newErrors.password = 'Password is required';
+    } else if (formData.password.length < 8) {
+      newErrors.password = 'Password must be at least 8 characters';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+    
     try {
-      setError(null);
+      setIsSubmitting(true);
+      setApiError(null);
       
-      console.log('Logging in user:', { email: data.email });
+      console.log('Logging in user:', { email: formData.email });
       
       // Login with Firebase Authentication
-      const success = await login(data.email, data.password);
+      const success = await login(formData.email, formData.password);
       
       console.log('Login result:', success);
       
@@ -44,11 +91,13 @@ const LoginForm = () => {
         navigate('/dashboard');
       } else {
         console.error('Login failed but no error was thrown');
-        setError('Login failed. Please try again.');
+        setApiError('Login failed. Please try again.');
       }
     } catch (err) {
       console.error('Login error:', err);
-      setError(err instanceof Error ? err.message : 'Invalid credentials. Please try again.');
+      setApiError(err instanceof Error ? err.message : 'Invalid credentials. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -69,17 +118,19 @@ const LoginForm = () => {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-6">
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
           <Input
             id="email"
+            name="email"
             type="email"
+            value={formData.email}
+            onChange={handleChange}
             placeholder="you@company.com"
-            {...register('email')}
           />
           {errors.email && (
-            <p className="text-sm text-red-500">{errors.email.message}</p>
+            <p className="text-sm text-red-500">{errors.email}</p>
           )}
         </div>
 
@@ -88,9 +139,11 @@ const LoginForm = () => {
           <div className="relative">
             <Input
               id="password"
+              name="password"
               type={showPassword ? 'text' : 'password'}
+              value={formData.password}
+              onChange={handleChange}
               placeholder="Enter your password"
-              {...register('password')}
             />
             <button
               type="button"
@@ -101,13 +154,13 @@ const LoginForm = () => {
             </button>
           </div>
           {errors.password && (
-            <p className="text-sm text-red-500">{errors.password.message}</p>
+            <p className="text-sm text-red-500">{errors.password}</p>
           )}
         </div>
 
-        {error && (
+        {apiError && (
           <div className="bg-red-50 text-red-500 text-sm p-3 rounded-lg">
-            {error}
+            {apiError}
           </div>
         )}
 

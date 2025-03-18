@@ -5,42 +5,98 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/label';
 
+interface RegisterFormData {
+  email: string;
+  password: string;
+  confirmPassword: string;
+  fullName: string;
+}
+
 const RegisterForm: React.FC = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [formError, setFormError] = useState('');
+  const [formData, setFormData] = useState<RegisterFormData>({
+    email: '',
+    password: '',
+    confirmPassword: '',
+    fullName: ''
+  });
+  const [errors, setErrors] = useState<{
+    email?: string;
+    password?: string;
+    confirmPassword?: string;
+    fullName?: string;
+  }>({});
+  const [apiError, setApiError] = useState<string | null>(null);
   const { register, error, isLoading } = useAuth();
   const navigate = useNavigate();
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    
+    // Clear error when user types
+    if (errors[name as keyof typeof errors]) {
+      setErrors(prev => ({
+        ...prev,
+        [name]: undefined
+      }));
+    }
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: {
+      email?: string;
+      password?: string;
+      confirmPassword?: string;
+      fullName?: string;
+    } = {};
+    
+    // Validate fullName
+    if (!formData.fullName.trim()) {
+      newErrors.fullName = 'Full name is required';
+    }
+    
+    // Validate email
+    if (!formData.email.trim()) {
+      newErrors.email = 'Email is required';
+    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      newErrors.email = 'Please enter a valid email address';
+    }
+    
+    // Validate password
+    if (!formData.password.trim()) {
+      newErrors.password = 'Password is required';
+    } else if (formData.password.length < 6) {
+      newErrors.password = 'Password must be at least 6 characters';
+    }
+    
+    // Validate confirmPassword
+    if (!formData.confirmPassword.trim()) {
+      newErrors.confirmPassword = 'Please confirm your password';
+    } else if (formData.password !== formData.confirmPassword) {
+      newErrors.confirmPassword = 'Passwords do not match';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!validateForm()) {
+      return;
+    }
+    
     try {
-      // Reset form error
-      setFormError('');
+      setApiError(null);
       
-      // Validate form
-      if (!email || !password || !confirmPassword) {
-        setFormError('All fields are required');
-        return;
-      }
-      
-      if (password !== confirmPassword) {
-        setFormError('Passwords do not match');
-        return;
-      }
-      
-      if (password.length < 6) {
-        setFormError('Password must be at least 6 characters');
-        return;
-      }
-      
-      console.log('Registering user:', { email, fullName });
+      console.log('Registering user:', { email: formData.email, fullName: formData.fullName });
       
       // Register user
-      const success = await register(email, password, fullName);
+      const success = await register(formData.email, formData.password, formData.fullName);
       
       console.log('Registration result:', success);
       
@@ -50,11 +106,11 @@ const RegisterForm: React.FC = () => {
         navigate('/onboarding');
       } else {
         console.error('Registration failed but no error was thrown');
-        setFormError('Registration failed. Please try again.');
+        setApiError('Registration failed. Please try again.');
       }
     } catch (err) {
       console.error('Registration error:', err);
-      setFormError(err instanceof Error ? err.message : 'An unexpected error occurred');
+      setApiError(err instanceof Error ? err.message : 'An unexpected error occurred');
     }
   };
 
@@ -62,10 +118,10 @@ const RegisterForm: React.FC = () => {
     <div className="w-full max-w-md p-6 bg-white rounded-lg shadow-md">
       <h2 className="text-2xl font-bold mb-6 text-center text-gray-800">Create an Account</h2>
       
-      {(error || formError) && (
+      {(error || apiError) && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
           <p className="font-medium">Error</p>
-          <p>{formError || error}</p>
+          <p>{apiError || error}</p>
         </div>
       )}
       
@@ -74,47 +130,60 @@ const RegisterForm: React.FC = () => {
           <Label htmlFor="fullName">Full Name</Label>
           <Input
             id="fullName"
+            name="fullName"
             type="text"
-            value={fullName}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFullName(e.target.value)}
+            value={formData.fullName}
+            onChange={handleChange}
             placeholder="John Doe"
           />
+          {errors.fullName && (
+            <p className="text-sm text-red-500">{errors.fullName}</p>
+          )}
         </div>
         
         <div className="mb-4">
           <Label htmlFor="email">Email</Label>
           <Input
             id="email"
+            name="email"
             type="email"
-            value={email}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
+            value={formData.email}
+            onChange={handleChange}
             placeholder="you@example.com"
-            required
           />
+          {errors.email && (
+            <p className="text-sm text-red-500">{errors.email}</p>
+          )}
         </div>
         
         <div className="mb-4">
           <Label htmlFor="password">Password</Label>
           <Input
             id="password"
+            name="password"
             type="password"
-            value={password}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
+            value={formData.password}
+            onChange={handleChange}
             placeholder="••••••••"
-            required
           />
+          {errors.password && (
+            <p className="text-sm text-red-500">{errors.password}</p>
+          )}
         </div>
         
         <div className="mb-6">
           <Label htmlFor="confirmPassword">Confirm Password</Label>
           <Input
             id="confirmPassword"
+            name="confirmPassword"
             type="password"
-            value={confirmPassword}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfirmPassword(e.target.value)}
+            value={formData.confirmPassword}
+            onChange={handleChange}
             placeholder="••••••••"
-            required
           />
+          {errors.confirmPassword && (
+            <p className="text-sm text-red-500">{errors.confirmPassword}</p>
+          )}
         </div>
         
         <Button

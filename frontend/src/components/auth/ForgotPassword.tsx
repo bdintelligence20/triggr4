@@ -1,29 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { ArrowLeft, Mail, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/label';
 
-const forgotPasswordSchema = z.object({
-  email: z.string().email('Please enter a valid email address'),
-});
-
-type ForgotPasswordFormData = z.infer<typeof forgotPasswordSchema>;
+interface ForgotPasswordFormData {
+  email: string;
+}
 
 const ForgotPassword = () => {
-  const [isSubmitted, setIsSubmitted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [cooldown, setCooldown] = useState(0);
-  const navigate = useNavigate();
-
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<ForgotPasswordFormData>({
-    resolver: zodResolver(forgotPasswordSchema),
+  const [formData, setFormData] = useState<ForgotPasswordFormData>({
+    email: ''
   });
+  const [errors, setErrors] = useState<{
+    email?: string;
+  }>({});
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const navigate = useNavigate();
 
   // Add useEffect for redirection
   useEffect(() => {
@@ -43,15 +41,54 @@ const ForgotPassword = () => {
     };
   }, [isSubmitted, navigate]);
 
-  const onSubmit = async (data: ForgotPasswordFormData) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    
+    // Clear error when user types
+    if (errors[name as keyof typeof errors]) {
+      setErrors(prev => ({
+        ...prev,
+        [name]: undefined
+      }));
+    }
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: {
+      email?: string;
+    } = {};
+    
+    // Validate email
+    if (!formData.email.trim()) {
+      newErrors.email = 'Email is required';
+    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      newErrors.email = 'Please enter a valid email address';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+    
     try {
-      setError(null);
+      setIsSubmitting(true);
+      setApiError(null);
       
       // Simulate API call
       await new Promise(resolve => setTimeout(resolve, 1500));
       
       // Demo: Always succeed for test@company.com
-      if (data.email === 'test@company.com') {
+      if (formData.email === 'test@company.com') {
         setIsSubmitted(true);
         setCooldown(30);
         
@@ -66,10 +103,12 @@ const ForgotPassword = () => {
           });
         }, 1000);
       } else {
-        setError('Email not found. Please check and try again.');
+        setApiError('Email not found. Please check and try again.');
       }
     } catch (err) {
-      setError('An error occurred. Please try again later.');
+      setApiError('An error occurred. Please try again later.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -138,29 +177,31 @@ const ForgotPassword = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            onSubmit={handleSubmit(onSubmit)}
+            onSubmit={handleSubmit}
             className="space-y-6"
           >
             <div className="space-y-2">
               <Label htmlFor="email">Email address</Label>
               <Input
                 id="email"
+                name="email"
                 type="email"
+                value={formData.email}
+                onChange={handleChange}
                 placeholder="you@company.com"
-                {...register('email')}
               />
               {errors.email && (
-                <p className="text-sm text-red-500">{errors.email.message}</p>
+                <p className="text-sm text-red-500">{errors.email}</p>
               )}
             </div>
 
-            {error && (
+            {apiError && (
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-red-50 text-red-500 text-sm p-3 rounded-lg"
               >
-                {error}
+                {apiError}
               </motion.div>
             )}
 

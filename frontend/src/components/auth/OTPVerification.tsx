@@ -1,8 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { ArrowLeft, Check, LogIn as WhatsappLogo } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../ui/Button';
@@ -10,22 +7,23 @@ import { Input } from '../ui/Input';
 import { Label } from '../ui/label';
 import OnboardingFlow from './OnboardingFlow';
 
-const otpSchema = z.object({
-  otp: z.string().length(6, 'Please enter a valid 6-digit code'),
-});
-
-type OTPFormData = z.infer<typeof otpSchema>;
+interface OTPFormData {
+  otp: string;
+}
 
 const OTPVerification = () => {
+  const [formData, setFormData] = useState<OTPFormData>({
+    otp: ''
+  });
+  const [errors, setErrors] = useState<{
+    otp?: string;
+  }>({});
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
-
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<OTPFormData>({
-    resolver: zodResolver(otpSchema),
-  });
 
   useEffect(() => {
     let redirectTimer: NodeJS.Timeout;
@@ -43,15 +41,54 @@ const OTPVerification = () => {
     };
   }, [isSubmitted, navigate]);
 
-  const onSubmit = async (data: OTPFormData) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    
+    // Clear error when user types
+    if (errors[name as keyof typeof errors]) {
+      setErrors(prev => ({
+        ...prev,
+        [name]: undefined
+      }));
+    }
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: {
+      otp?: string;
+    } = {};
+    
+    // Validate OTP
+    if (!formData.otp.trim()) {
+      newErrors.otp = 'Verification code is required';
+    } else if (formData.otp.length !== 6) {
+      newErrors.otp = 'Please enter a valid 6-digit code';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+    
     try {
-      setError(null);
+      setIsSubmitting(true);
+      setApiError(null);
       
       // Simulate API call
       await new Promise(resolve => setTimeout(resolve, 1500));
       
       // Demo: Always succeed for 123456
-      if (data.otp === '123456') {
+      if (formData.otp === '123456') {
         setIsSubmitted(true);
         setCooldown(30);
         
@@ -66,10 +103,12 @@ const OTPVerification = () => {
           });
         }, 1000);
       } else {
-        setError('Invalid verification code. Please try again.');
+        setApiError('Invalid verification code. Please try again.');
       }
     } catch (err) {
-      setError('An error occurred. Please try again later.');
+      setApiError('An error occurred. Please try again later.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -127,30 +166,32 @@ const OTPVerification = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            onSubmit={handleSubmit(onSubmit)}
+            onSubmit={handleSubmit}
             className="space-y-6"
           >
             <div className="space-y-2">
               <Label htmlFor="otp">Verification Code</Label>
               <Input
                 id="otp"
+                name="otp"
                 type="text"
+                value={formData.otp}
+                onChange={handleChange}
                 placeholder="Enter 6-digit code"
                 maxLength={6}
-                {...register('otp')}
               />
               {errors.otp && (
-                <p className="text-sm text-red-500">{errors.otp.message}</p>
+                <p className="text-sm text-red-500">{errors.otp}</p>
               )}
             </div>
 
-            {error && (
+            {apiError && (
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-red-50 text-red-500 text-sm p-3 rounded-lg"
               >
-                {error}
+                {apiError}
               </motion.div>
             )}
 

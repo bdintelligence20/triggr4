@@ -1,46 +1,87 @@
 import React, { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { Button } from '../../../ui/Button';
 import { Input } from '../../../ui/Input';
 import { Label } from '../../../ui/label';
 import { Building2, Info, AlertCircle } from 'lucide-react';
 import * as api from '../../../../services/api';
 
-const organizationSchema = z.object({
-  organizationName: z.string().min(1, 'Organization name is required').trim(),
-  organizationSize: z.enum(['1-10', '11-50', '51-200', '201-500', '501+']),
-  industry: z.string().min(1, 'Industry is required').trim(),
-});
-
-type OrganizationFormData = z.infer<typeof organizationSchema>;
+interface OrganizationFormData {
+  organizationName: string;
+  organizationSize: string;
+  industry: string;
+}
 
 interface OrganizationSetupProps {
   onComplete: (data: OrganizationFormData) => void;
 }
 
 const OrganizationSetup: React.FC<OrganizationSetupProps> = ({ onComplete }) => {
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  
-  const { register, handleSubmit, formState: { errors } } = useForm<OrganizationFormData>({
-    resolver: zodResolver(organizationSchema),
-    defaultValues: {
-      organizationSize: '1-10',
-    },
+  const [formData, setFormData] = useState<OrganizationFormData>({
+    organizationName: '',
+    organizationSize: '1-10',
+    industry: '',
   });
+  
+  const [errors, setErrors] = useState<{
+    organizationName?: string;
+    industry?: string;
+  }>({});
+  
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
-  const handleFormSubmit = async (data: OrganizationFormData) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    
+    // Clear error when user types
+    if (errors[name as keyof typeof errors]) {
+      setErrors(prev => ({
+        ...prev,
+        [name]: undefined
+      }));
+    }
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: {
+      organizationName?: string;
+      industry?: string;
+    } = {};
+    
+    // Validate organizationName
+    if (!formData.organizationName.trim()) {
+      newErrors.organizationName = 'Organization name is required';
+    }
+    
+    // Validate industry
+    if (!formData.industry.trim()) {
+      newErrors.industry = 'Industry is required';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+    
     try {
       setIsSubmitting(true);
-      setError(null);
+      setApiError(null);
       
       // Call the API to create the organization
       const response = await api.createOrganization(
-        data.organizationName,
-        data.industry,
-        data.organizationSize
+        formData.organizationName,
+        formData.industry,
+        formData.organizationSize
       );
       
       if (response.error) {
@@ -48,10 +89,10 @@ const OrganizationSetup: React.FC<OrganizationSetupProps> = ({ onComplete }) => 
       }
       
       // If successful, continue to the next step
-      onComplete(data);
+      onComplete(formData);
     } catch (err) {
       console.error('Organization creation failed:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create organization. Please try again.');
+      setApiError(err instanceof Error ? err.message : 'Failed to create organization. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -73,7 +114,7 @@ const OrganizationSetup: React.FC<OrganizationSetupProps> = ({ onComplete }) => 
         </p>
       </div>
 
-      <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-6">
         <div className="space-y-2">
           <Label htmlFor="organizationName">Organization Name</Label>
           <div className="relative">
@@ -82,14 +123,16 @@ const OrganizationSetup: React.FC<OrganizationSetupProps> = ({ onComplete }) => 
             </div>
             <Input
               id="organizationName"
+              name="organizationName"
               type="text"
+              value={formData.organizationName}
+              onChange={handleChange}
               placeholder="Your company name"
               className="pl-10"
-              {...register('organizationName')}
             />
           </div>
           {errors.organizationName && (
-            <p className="text-sm text-red-500">{errors.organizationName.message}</p>
+            <p className="text-sm text-red-500">{errors.organizationName}</p>
           )}
         </div>
 
@@ -97,12 +140,14 @@ const OrganizationSetup: React.FC<OrganizationSetupProps> = ({ onComplete }) => 
           <Label htmlFor="industry">Industry</Label>
           <Input
             id="industry"
+            name="industry"
             type="text"
+            value={formData.industry}
+            onChange={handleChange}
             placeholder="e.g. Healthcare, Finance, Education"
-            {...register('industry')}
           />
           {errors.industry && (
-            <p className="text-sm text-red-500">{errors.industry.message}</p>
+            <p className="text-sm text-red-500">{errors.industry}</p>
           )}
         </div>
 
@@ -110,8 +155,10 @@ const OrganizationSetup: React.FC<OrganizationSetupProps> = ({ onComplete }) => 
           <Label htmlFor="organizationSize">Organization Size</Label>
           <select
             id="organizationSize"
+            name="organizationSize"
+            value={formData.organizationSize}
+            onChange={handleChange}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-400"
-            {...register('organizationSize')}
           >
             <option value="1-10">1-10 employees</option>
             <option value="11-50">11-50 employees</option>
@@ -119,15 +166,12 @@ const OrganizationSetup: React.FC<OrganizationSetupProps> = ({ onComplete }) => 
             <option value="201-500">201-500 employees</option>
             <option value="501+">501+ employees</option>
           </select>
-          {errors.organizationSize && (
-            <p className="text-sm text-red-500">{errors.organizationSize.message}</p>
-          )}
         </div>
 
-        {error && (
+        {apiError && (
           <div className="bg-red-50 p-4 rounded-lg flex items-start gap-3">
             <AlertCircle size={20} className="text-red-500 mt-0.5 flex-shrink-0" />
-            <p className="text-sm text-red-700">{error}</p>
+            <p className="text-sm text-red-700">{apiError}</p>
           </div>
         )}
 

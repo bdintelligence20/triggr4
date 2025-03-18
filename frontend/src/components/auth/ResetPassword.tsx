@@ -1,28 +1,15 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { ArrowLeft, Eye, EyeOff, Loader2, Check, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/label';
 
-const passwordSchema = z.object({
-  password: z
-    .string()
-    .min(8, 'Password must be at least 8 characters')
-    .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
-    .regex(/[0-9]/, 'Password must contain at least one number')
-    .regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character'),
-  confirmPassword: z.string()
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "Passwords don't match",
-  path: ["confirmPassword"],
-});
-
-type ResetPasswordFormData = z.infer<typeof passwordSchema>;
+interface ResetPasswordFormData {
+  password: string;
+  confirmPassword: string;
+}
 
 const PasswordStrengthIndicator = ({ password }: { password: string }) => {
   const getStrength = () => {
@@ -74,21 +61,79 @@ const PasswordStrengthIndicator = ({ password }: { password: string }) => {
 };
 
 const ResetPassword = () => {
+  const [formData, setFormData] = useState<ResetPasswordFormData>({
+    password: '',
+    confirmPassword: ''
+  });
+  const [errors, setErrors] = useState<{
+    password?: string;
+    confirmPassword?: string;
+  }>({});
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
 
-  const { register, handleSubmit, watch, formState: { errors, isSubmitting } } = useForm<ResetPasswordFormData>({
-    resolver: zodResolver(passwordSchema)
-  });
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    
+    // Clear error when user types
+    if (errors[name as keyof typeof errors]) {
+      setErrors(prev => ({
+        ...prev,
+        [name]: undefined
+      }));
+    }
+  };
 
-  const password = watch('password', '');
+  const validateForm = (): boolean => {
+    const newErrors: {
+      password?: string;
+      confirmPassword?: string;
+    } = {};
+    
+    // Validate password
+    if (!formData.password.trim()) {
+      newErrors.password = 'Password is required';
+    } else {
+      if (formData.password.length < 8) {
+        newErrors.password = 'Password must be at least 8 characters';
+      } else if (!/[A-Z]/.test(formData.password)) {
+        newErrors.password = 'Password must contain at least one uppercase letter';
+      } else if (!/[0-9]/.test(formData.password)) {
+        newErrors.password = 'Password must contain at least one number';
+      } else if (!/[^A-Za-z0-9]/.test(formData.password)) {
+        newErrors.password = 'Password must contain at least one special character';
+      }
+    }
+    
+    // Validate confirmPassword
+    if (!formData.confirmPassword.trim()) {
+      newErrors.confirmPassword = 'Please confirm your password';
+    } else if (formData.password !== formData.confirmPassword) {
+      newErrors.confirmPassword = "Passwords don't match";
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
-  const onSubmit = async (data: ResetPasswordFormData) => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+    
     try {
-      setError(null);
+      setIsSubmitting(true);
+      setApiError(null);
       
       // Simulate API call
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -101,7 +146,9 @@ const ResetPassword = () => {
         navigate('/login');
       }, 2000);
     } catch (err) {
-      setError('Failed to reset password. Please try again.');
+      setApiError('Failed to reset password. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -147,7 +194,7 @@ const ResetPassword = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            onSubmit={handleSubmit(onSubmit)}
+            onSubmit={handleSubmit}
             className="space-y-6"
           >
             <div className="space-y-2">
@@ -155,8 +202,10 @@ const ResetPassword = () => {
               <div className="relative">
                 <Input
                   id="password"
+                  name="password"
                   type={showPassword ? 'text' : 'password'}
-                  {...register('password')}
+                  value={formData.password}
+                  onChange={handleChange}
                   className={errors.password ? 'border-red-400' : ''}
                 />
                 <button
@@ -168,9 +217,9 @@ const ResetPassword = () => {
                 </button>
               </div>
               {errors.password && (
-                <p className="text-sm text-red-500">{errors.password.message}</p>
+                <p className="text-sm text-red-500">{errors.password}</p>
               )}
-              <PasswordStrengthIndicator password={password} />
+              <PasswordStrengthIndicator password={formData.password} />
             </div>
 
             <div className="space-y-2">
@@ -178,8 +227,10 @@ const ResetPassword = () => {
               <div className="relative">
                 <Input
                   id="confirmPassword"
+                  name="confirmPassword"
                   type={showConfirmPassword ? 'text' : 'password'}
-                  {...register('confirmPassword')}
+                  value={formData.confirmPassword}
+                  onChange={handleChange}
                   className={errors.confirmPassword ? 'border-red-400' : ''}
                 />
                 <button
@@ -191,18 +242,18 @@ const ResetPassword = () => {
                 </button>
               </div>
               {errors.confirmPassword && (
-                <p className="text-sm text-red-500">{errors.confirmPassword.message}</p>
+                <p className="text-sm text-red-500">{errors.confirmPassword}</p>
               )}
             </div>
 
-            {error && (
+            {apiError && (
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="flex items-center gap-2 bg-red-50 text-red-500 text-sm p-3 rounded-lg"
               >
                 <AlertCircle size={16} />
-                {error}
+                {apiError}
               </motion.div>
             )}
 

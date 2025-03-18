@@ -1,18 +1,13 @@
-import React from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
+import React, { useState } from 'react';
 import { Button } from '../../../ui/Button';
 import { Input } from '../../../ui/Input';
 import { Label } from '../../../ui/label';
 
-const contactSchema = z.object({
-  fullName: z.string().min(1, 'Full name is required').trim(),
-  email: z.string().min(1, 'Email is required').email('Please enter a valid email address').trim(),
-  whatsapp: z.string().optional(),
-});
-
-type ContactFormData = z.infer<typeof contactSchema>;
+interface ContactFormData {
+  fullName: string;
+  email: string;
+  whatsapp?: string;
+}
 
 interface ContactInfoProps {
   initialData: {
@@ -24,10 +19,63 @@ interface ContactInfoProps {
 }
 
 const ContactInfo: React.FC<ContactInfoProps> = ({ initialData, onComplete }) => {
-  const { register, handleSubmit, formState: { errors } } = useForm<ContactFormData>({
-    resolver: zodResolver(contactSchema),
-    defaultValues: initialData,
+  const [formData, setFormData] = useState<ContactFormData>({
+    fullName: initialData.fullName || '',
+    email: initialData.email || '',
+    whatsapp: initialData.whatsapp || '',
   });
+  const [errors, setErrors] = useState<{
+    fullName?: string;
+    email?: string;
+    whatsapp?: string;
+  }>({});
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    
+    // Clear error when user types
+    if (errors[name as keyof typeof errors]) {
+      setErrors(prev => ({
+        ...prev,
+        [name]: undefined
+      }));
+    }
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: {
+      fullName?: string;
+      email?: string;
+      whatsapp?: string;
+    } = {};
+    
+    // Validate fullName
+    if (!formData.fullName.trim()) {
+      newErrors.fullName = 'Full name is required';
+    }
+    
+    // Validate email
+    if (!formData.email.trim()) {
+      newErrors.email = 'Email is required';
+    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      newErrors.email = 'Please enter a valid email address';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (validateForm()) {
+      onComplete(formData);
+    }
+  };
 
   return (
     <div className="bg-white rounded-xl shadow-sm p-8">
@@ -38,17 +86,19 @@ const ContactInfo: React.FC<ContactInfoProps> = ({ initialData, onComplete }) =>
         </p>
       </div>
 
-      <form onSubmit={handleSubmit(onComplete)} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-6">
         <div className="space-y-2">
           <Label htmlFor="fullName">Full Name</Label>
           <Input
             id="fullName"
+            name="fullName"
             type="text"
+            value={formData.fullName}
+            onChange={handleChange}
             placeholder="Your full name"
-            {...register('fullName')}
           />
           {errors.fullName && (
-            <p className="text-sm text-red-500">{errors.fullName.message}</p>
+            <p className="text-sm text-red-500">{errors.fullName}</p>
           )}
         </div>
 
@@ -56,12 +106,14 @@ const ContactInfo: React.FC<ContactInfoProps> = ({ initialData, onComplete }) =>
           <Label htmlFor="email">Email Address</Label>
           <Input
             id="email"
+            name="email"
             type="email"
+            value={formData.email}
+            onChange={handleChange}
             placeholder="you@company.com"
-            {...register('email')}
           />
           {errors.email && (
-            <p className="text-sm text-red-500">{errors.email.message}</p>
+            <p className="text-sm text-red-500">{errors.email}</p>
           )}
         </div>
 
@@ -69,12 +121,14 @@ const ContactInfo: React.FC<ContactInfoProps> = ({ initialData, onComplete }) =>
           <Label htmlFor="whatsapp">WhatsApp Number (Optional)</Label>
           <Input
             id="whatsapp"
+            name="whatsapp"
             type="tel"
+            value={formData.whatsapp}
+            onChange={handleChange}
             placeholder="+27 12 345 6789"
-            {...register('whatsapp')}
           />
           {errors.whatsapp && (
-            <p className="text-sm text-red-500">{errors.whatsapp.message}</p>
+            <p className="text-sm text-red-500">{errors.whatsapp}</p>
           )}
           <p className="text-xs text-gray-500">
             We'll use this for WhatsApp notifications if you enable them
