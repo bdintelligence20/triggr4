@@ -27,7 +27,12 @@ GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "knowledge-hub-files")
 
 # Get Google Cloud Storage bucket
 from google.cloud import storage
-gcs_client = storage.Client()
+from firebase_admin import credentials
+import firebase_admin
+
+# Use Firebase Admin SDK credentials for GCS
+cred = firebase_admin.get_app().credential
+gcs_client = storage.Client(credentials=cred, project=cred.project_id)
 bucket = gcs_client.bucket(GCS_BUCKET_NAME)
 
 @document_bp.route('/upload', methods=['POST'])
