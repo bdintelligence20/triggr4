@@ -1,6 +1,6 @@
 from langchain_community.vectorstores import Pinecone
 from langchain_openai import OpenAIEmbeddings
-from langchain_core.documents import Document
+from langchain.schema import Document
 from typing import List, Dict, Any, Optional
 import logging
 import os

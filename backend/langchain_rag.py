@@ -1,11 +1,11 @@
-from langchain_core.documents import Document
+from langchain.schema import Document
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.chat_models import ChatOpenAI, ChatAnthropic
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import CohereRerank
 from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
-from langchain_core.memory import ConversationBufferMemory
-from langchain_core.prompts import PromptTemplate
+from langchain.memory import ConversationBufferMemory
+from langchain.prompts import PromptTemplate
 from typing import List, Dict, Any, Optional, Callable
 import logging
 import os
