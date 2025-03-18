@@ -41,7 +41,7 @@ pinecone
 twilio
 google-cloud-storage
 openai
-anthropic==0.2.14
+anthropic==0.3.11
 nltk
 sentence-transformers
 
