@@ -1,6 +1,7 @@
 from langchain.schema import Document
 from langchain_openai import OpenAIEmbeddings
-from langchain_community.chat_models import ChatOpenAI, ChatAnthropic
+from langchain_community.chat_models import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import CohereRerank
 from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
