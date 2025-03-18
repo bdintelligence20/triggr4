@@ -27,13 +27,11 @@ GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "knowledge-hub-files")
 
 # Get Google Cloud Storage bucket
 from google.cloud import storage
-from firebase_admin import credentials
 import firebase_admin
+from flask import current_app
 
-# Use Firebase Admin SDK credentials for GCS
-cred = firebase_admin.get_app().credential
-gcs_client = storage.Client(credentials=cred, project=cred.project_id)
-bucket = gcs_client.bucket(GCS_BUCKET_NAME)
+# Import the GCS client from app.py
+from app import gcs_client, bucket
 
 @document_bp.route('/upload', methods=['POST'])
 def upload_document():
@@ -83,6 +81,18 @@ def upload_document():
         doc_ref = db.collection("knowledge_items").document()
         item_id = doc_ref.id
         
+        # Upload file to GCS with organization-specific path
+        gcs_filename = f"{item_id}_{filename}"
+        org_path = f"documents/{organization_id or 'global'}/{gcs_filename}"
+        blob = bucket.blob(org_path)
+        
+        with open(local_path, 'rb') as file_obj:
+            blob.upload_from_file(file_obj)
+        
+        # Generate public URL (or signed URL if needed)
+        file_url = f"https://storage.googleapis.com/{GCS_BUCKET_NAME}/{org_path}"
+        logger.info(f"File uploaded to GCS: {org_path}")
+        
         # Save initial metadata to Firestore
         doc_data = {
             "title": title,
@@ -90,7 +100,8 @@ def upload_document():
             "file_type": file_ext,
             "created_at": firestore.SERVER_TIMESTAMP,
             "processing_status": "processing",
-            "organizationId": organization_id
+            "organizationId": organization_id,
+            "file_url": file_url
         }
         doc_ref.set(doc_data)
         logger.info(f"Created document record with ID: {item_id}")
@@ -236,10 +247,17 @@ def delete_document(item_id):
         # Delete from GCS if URL exists
         if 'file_url' in doc_data:
             try:
-                file_path = doc_data['file_url'].split('/')[-1]
-                blob = bucket.blob(f"documents/{file_path}")
+                # Extract organization ID from the document
+                org_id = doc_data.get("organizationId") or "global"
+                
+                # Parse the filename from the URL
+                file_name = doc_data['file_url'].split('/')[-1]
+                
+                # Use organization-specific path
+                org_path = f"documents/{org_id}/{file_name}"
+                blob = bucket.blob(org_path)
                 blob.delete()
-                logger.info(f"Deleted file from GCS: {file_path}")
+                logger.info(f"Deleted file from GCS: {org_path}")
             except Exception as e:
                 logger.warning(f"Failed to delete file from GCS: {str(e)}")
         
