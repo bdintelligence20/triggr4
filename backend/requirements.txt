@@ -1,11 +1,11 @@
 # LangChain Core
-langchain==0.1.12
-langchain-core==0.1.30
-langchain-community==0.0.29
-langchain-openai==0.0.8
-langchain-anthropic==0.1.1
-langchain-pinecone==0.0.2
-langchain-text-splitters==0.0.1
+langchain
+langchain-core
+langchain-community
+langchain-openai
+langchain-anthropic
+langchain-pinecone
+langchain-text-splitters
 
 # Document Processing
 unstructured
@@ -41,7 +41,7 @@ pinecone
 twilio
 google-cloud-storage
 openai
-anthropic==0.18.0
+anthropic==0.2.14
 nltk
 sentence-transformers
 
