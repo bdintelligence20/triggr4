@@ -9,9 +9,9 @@ import { Building2, Info, AlertCircle } from 'lucide-react';
 import * as api from '../../../../services/api';
 
 const organizationSchema = z.object({
-  organizationName: z.string().min(2, 'Organization name is required'),
+  organizationName: z.string().min(1, 'Organization name is required').trim(),
   organizationSize: z.enum(['1-10', '11-50', '51-200', '201-500', '501+']),
-  industry: z.string().min(2, 'Industry is required'),
+  industry: z.string().min(1, 'Industry is required').trim(),
 });
 
 type OrganizationFormData = z.infer<typeof organizationSchema>;

@@ -7,8 +7,8 @@ import { Input } from '../../../ui/Input';
 import { Label } from '../../../ui/label';
 
 const contactSchema = z.object({
-  fullName: z.string().min(2, 'Full name is required'),
-  email: z.string().email('Please enter a valid email address'),
+  fullName: z.string().min(1, 'Full name is required').trim(),
+  email: z.string().min(1, 'Email is required').email('Please enter a valid email address').trim(),
   whatsapp: z.string().optional(),
 });
 
