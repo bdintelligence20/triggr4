@@ -1,6 +1,6 @@
 from langchain.schema import Document
 from langchain_openai import OpenAIEmbeddings
-from langchain_anthropic import ChatAnthropic
+from langchain.llms.base import LLM
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import CohereRerank
 from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
@@ -9,27 +9,56 @@ from langchain.prompts import PromptTemplate
 from typing import List, Dict, Any, Optional, Callable
 import logging
 import os
-from vector_store import EnhancedPineconeStore
 import anthropic
+from vector_store import EnhancedPineconeStore
 
 logger = logging.getLogger(__name__)
 
-# Custom ChatAnthropic class that adds the missing count_tokens method
-class CustomChatAnthropic(ChatAnthropic):
-    """Custom ChatAnthropic class that adds a count_tokens method."""
+# Create a custom LLM class that uses the Anthropic client directly
+class CustomAnthropicLLM(LLM):
+    """Custom LLM class that uses the Anthropic client directly."""
     
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # Add a simple count_tokens method that estimates token count
-        # This is a workaround for the missing method in the Anthropic client
-        self.client.count_tokens = self._estimate_tokens
+    def __init__(self, anthropic_api_key: str, model: str = "claude-3-7-sonnet-20250219", temperature: float = 1):
+        super().__init__()
+        self.anthropic_api_key = anthropic_api_key
+        self.model = model
+        self.temperature = temperature
+        self.client = anthropic.Anthropic(api_key=anthropic_api_key)
     
-    def _estimate_tokens(self, text):
-        """Estimate token count using a simple heuristic.
-        
-        This is a rough approximation - Claude uses ~4 chars per token on average.
-        """
-        return len(text) // 4
+    def _call(self, prompt: str, stop=None) -> str:
+        """Call the Anthropic API and return the response."""
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=8000,
+                temperature=self.temperature,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return response.content[0].text
+        except Exception as e:
+            logger.error(f"Error calling Anthropic API: {str(e)}")
+            return "I encountered an error while processing your query. Please try again."
+    
+    def _llm_type(self) -> str:
+        """Return the type of LLM."""
+        return "custom_anthropic"
+    
+    def stream(self, prompt: str) -> Any:
+        """Stream the response from the Anthropic API."""
+        try:
+            with self.client.messages.stream(
+                model=self.model,
+                max_tokens=8000,
+                temperature=self.temperature,
+                messages=[{"role": "user", "content": prompt}]
+            ) as stream:
+                for chunk in stream:
+                    if chunk.type == "content_block_delta" and chunk.delta.text:
+                        # Create a simple object with a content attribute to match LangChain's expected format
+                        yield type('obj', (), {'content': chunk.delta.text})
+        except Exception as e:
+            logger.error(f"Error streaming from Anthropic API: {str(e)}")
+            yield type('obj', (), {'content': "I encountered an error while processing your query. Please try again."})
 
 class LangChainRAG:
     """Advanced RAG system using LangChain."""
@@ -54,10 +83,10 @@ class LangChainRAG:
             openai_api_key=self.openai_api_key
         )
         
-        # Initialize LLM with our custom wrapper
-        self.llm = CustomChatAnthropic(
-            model="claude-3-7-sonnet-20250219",
+        # Initialize LLM with our custom Anthropic LLM
+        self.llm = CustomAnthropicLLM(
             anthropic_api_key=self.anthropic_api_key,
+            model="claude-3-7-sonnet-20250219",
             temperature=1
         )
         
