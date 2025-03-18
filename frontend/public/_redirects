@@ -1,2 +1,8 @@
 # Netlify SPA redirect configuration
 /*    /index.html   200
+
+# Ensure all routes are handled by the SPA
+/register    /index.html   200
+/login       /index.html   200
+/dashboard   /index.html   200
+/onboarding  /index.html   200

@@ -47,8 +47,14 @@ def register():
     password = data.get('password')
     full_name = data.get('fullName')
     
-    if not email or not password:
-        return jsonify({'error': 'Email and password are required'}), 400
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+    
+    if not password:
+        return jsonify({'error': 'Password is required'}), 400
+        
+    if len(password) < 6:
+        return jsonify({'error': 'Password must be at least 6 characters'}), 400
     
     try:
         # Create user in Firebase Authentication
@@ -113,11 +119,16 @@ def login():
     
     try:
         # Sign in with Firebase Authentication
-        user = auth.get_user_by_email(email)
+        # Since Firebase Admin SDK cannot verify passwords, we'll use a simple approach
+        # First, check if the user exists
+        try:
+            user = auth.get_user_by_email(email)
+        except exceptions.FirebaseError as e:
+            logger.error(f"Firebase login error: {str(e)}")
+            return jsonify({'error': 'Invalid credentials'}), 401
         
-        # Note: Firebase Admin SDK cannot verify passwords
-        # In a production app, you would use Firebase Auth REST API for this
-        # For this demo, we'll assume the password is correct if the user exists
+        # For simplicity, we'll assume the password is correct if the user exists
+        # In a production app, you would use Firebase Auth REST API to verify passwords
         
         # Get user data from Firestore
         user_doc = db.collection('users').document(user.uid).get()

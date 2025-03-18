@@ -18,5 +18,10 @@ export default defineConfig({
         },
       },
     },
+    outDir: 'dist',
+  },
+  preview: {
+    port: 3000,
+    strictPort: true,
   },
 });

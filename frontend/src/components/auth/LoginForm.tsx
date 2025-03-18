@@ -31,15 +31,24 @@ const LoginForm = () => {
     try {
       setError(null);
       
+      console.log('Logging in user:', { email: data.email });
+      
       // Login with Firebase Authentication
       const success = await login(data.email, data.password);
       
+      console.log('Login result:', success);
+      
       if (success) {
         // Navigate to dashboard
+        console.log('Redirecting to dashboard');
         navigate('/dashboard');
+      } else {
+        console.error('Login failed but no error was thrown');
+        setError('Login failed. Please try again.');
       }
     } catch (err) {
-      setError('Invalid credentials. Please try again.');
+      console.error('Login error:', err);
+      setError(err instanceof Error ? err.message : 'Invalid credentials. Please try again.');
     }
   };
 

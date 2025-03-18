@@ -17,31 +17,44 @@ const RegisterForm: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Reset form error
-    setFormError('');
-    
-    // Validate form
-    if (!email || !password || !confirmPassword) {
-      setFormError('All fields are required');
-      return;
-    }
-    
-    if (password !== confirmPassword) {
-      setFormError('Passwords do not match');
-      return;
-    }
-    
-    if (password.length < 6) {
-      setFormError('Password must be at least 6 characters');
-      return;
-    }
-    
-    // Register user
-    const success = await register(email, password, fullName);
-    
-    if (success) {
-      // Redirect to onboarding
-      navigate('/onboarding');
+    try {
+      // Reset form error
+      setFormError('');
+      
+      // Validate form
+      if (!email || !password || !confirmPassword) {
+        setFormError('All fields are required');
+        return;
+      }
+      
+      if (password !== confirmPassword) {
+        setFormError('Passwords do not match');
+        return;
+      }
+      
+      if (password.length < 6) {
+        setFormError('Password must be at least 6 characters');
+        return;
+      }
+      
+      console.log('Registering user:', { email, fullName });
+      
+      // Register user
+      const success = await register(email, password, fullName);
+      
+      console.log('Registration result:', success);
+      
+      if (success) {
+        // Redirect to onboarding
+        console.log('Redirecting to onboarding');
+        navigate('/onboarding');
+      } else {
+        console.error('Registration failed but no error was thrown');
+        setFormError('Registration failed. Please try again.');
+      }
+    } catch (err) {
+      console.error('Registration error:', err);
+      setFormError(err instanceof Error ? err.message : 'An unexpected error occurred');
     }
   };
 

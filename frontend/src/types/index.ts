@@ -44,5 +44,5 @@ export interface KnowledgeItem {
     error?: string;
   }
   
-  // API URL - Could also be in an environment variable
-  export const API_URL = 'https://triggr4bg.onrender.com';
+// API URL - Could also be in an environment variable
+export const API_URL = 'https://triggr4bg.onrender.com';
