@@ -162,7 +162,7 @@ const Sidebar: React.FC = () => {
             className="w-full flex items-center justify-center px-3 py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
           >
             <MessageSquare size={20} className="mr-2" />
-            <span>Chat</span>
+            <span>Knowledge Chat</span>
           </Link>
           
           <button
