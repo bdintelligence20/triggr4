@@ -70,9 +70,13 @@ export const useChat = () => {
       const conversationHistory = buildConversationHistory();
       
       // Send the POST request including conversation history in the payload
+      const token = localStorage.getItem('auth_token');
       const response = await fetch(`${API_URL}/query`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           query: newMessage,
           category: categoryName === 'All Items' ? '' : categoryName.toLowerCase(),
