@@ -1,64 +1,18 @@
 from langchain.schema import Document
 from langchain_openai import OpenAIEmbeddings
-from langchain.llms.base import LLM
+from langchain_anthropic import ChatAnthropic
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import CohereRerank
+from langchain_community.retrievers import PineconeHybridSearchRetriever
 from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import PromptTemplate
 from typing import List, Dict, Any, Optional, Callable
 import logging
 import os
-import anthropic
 from vector_store import EnhancedPineconeStore
 
 logger = logging.getLogger(__name__)
-
-# Create a custom LLM class that uses the Anthropic client directly
-class CustomAnthropicLLM(LLM):
-    """Custom LLM class that uses the Anthropic client directly."""
-    
-    def __init__(self, anthropic_api_key: str, model: str = "claude-3-7-sonnet-20250219", temperature: float = 1):
-        super().__init__()
-        self.anthropic_api_key = anthropic_api_key
-        self.model = model
-        self.temperature = temperature
-        self.client = anthropic.Anthropic(api_key=anthropic_api_key)
-    
-    def _call(self, prompt: str, stop=None) -> str:
-        """Call the Anthropic API and return the response."""
-        try:
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=8000,
-                temperature=self.temperature,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            return response.content[0].text
-        except Exception as e:
-            logger.error(f"Error calling Anthropic API: {str(e)}")
-            return "I encountered an error while processing your query. Please try again."
-    
-    def _llm_type(self) -> str:
-        """Return the type of LLM."""
-        return "custom_anthropic"
-    
-    def stream(self, prompt: str) -> Any:
-        """Stream the response from the Anthropic API."""
-        try:
-            with self.client.messages.stream(
-                model=self.model,
-                max_tokens=8000,
-                temperature=self.temperature,
-                messages=[{"role": "user", "content": prompt}]
-            ) as stream:
-                for chunk in stream:
-                    if chunk.type == "content_block_delta" and chunk.delta.text:
-                        # Create a simple object with a content attribute to match LangChain's expected format
-                        yield type('obj', (), {'content': chunk.delta.text})
-        except Exception as e:
-            logger.error(f"Error streaming from Anthropic API: {str(e)}")
-            yield type('obj', (), {'content': "I encountered an error while processing your query. Please try again."})
 
 class LangChainRAG:
     """Advanced RAG system using LangChain."""
@@ -83,11 +37,13 @@ class LangChainRAG:
             openai_api_key=self.openai_api_key
         )
         
-        # Initialize LLM with our custom Anthropic LLM
-        self.llm = CustomAnthropicLLM(
-            anthropic_api_key=self.anthropic_api_key,
+        # Initialize LLM - using standard ChatAnthropic
+        # Following the documentation at https://python.langchain.com/docs/integrations/chat/anthropic/
+        self.llm = ChatAnthropic(
+            api_key=self.anthropic_api_key,
             model="claude-3-7-sonnet-20250219",
-            temperature=1
+            temperature=1,
+            max_tokens=8000
         )
         
         # Initialize vector store
@@ -144,14 +100,60 @@ class LangChainRAG:
         # Create filter dict if category is provided
         filter_dict = {"category": category} if category else None
         
-        # Create base retriever
-        base_retriever = self.vector_store.vector_store.as_retriever(
-            search_type="similarity",
-            search_kwargs={
-                "k": 10,  # Retrieve more candidates for reranking
-                "filter": filter_dict
-            }
-        )
+        # Use the official PineconeHybridSearchRetriever for better results
+        try:
+            from pinecone import Pinecone, ServerlessSpec
+            import pinecone_text
+            
+            # Initialize Pinecone client
+            pc = Pinecone(api_key=self.pinecone_api_key)
+            
+            # Get the namespace based on organization
+            namespace = f"org_{self.organization_id}" if self.organization_id else "global_knowledge_base"
+            
+            # Create the official PineconeHybridSearchRetriever
+            base_retriever = PineconeHybridSearchRetriever(
+                embeddings=self.embedding_model,
+                pinecone_api_key=self.pinecone_api_key,
+                index_name=self.index_name,
+                namespace=namespace,
+                top_k=10,  # Retrieve more candidates for reranking
+                alpha=0.5,  # Balance between sparse and dense retrieval (0.0 = all sparse, 1.0 = all dense)
+                filter=filter_dict,
+                text_field="text"  # The field containing the document text
+            )
+            logger.info("Using official PineconeHybridSearchRetriever")
+        except Exception as e:
+            # Fallback to our custom hybrid search if the official one fails
+            try:
+                logger.warning(f"Official PineconeHybridSearchRetriever not available, trying custom hybrid: {str(e)}")
+                # Use our custom hybrid search implementation
+                docs_retriever = lambda query: self.vector_store.hybrid_search(
+                    query=query,
+                    k=10,  # Retrieve more candidates for reranking
+                    filter_dict=filter_dict
+                )
+                
+                # Create a custom retriever that uses our hybrid search
+                class CustomHybridSearchRetriever:
+                    def __init__(self, search_func):
+                        self.search_func = search_func
+                    
+                    def get_relevant_documents(self, query):
+                        return self.search_func(query)
+                
+                base_retriever = CustomHybridSearchRetriever(docs_retriever)
+                logger.info("Using custom hybrid search retriever")
+            except Exception as e2:
+                # Fallback to standard similarity search if both hybrid search methods fail
+                logger.warning(f"Hybrid search not available, falling back to similarity: {str(e2)}")
+                base_retriever = self.vector_store.vector_store.as_retriever(
+                    search_type="similarity",
+                    search_kwargs={
+                        "k": 10,  # Retrieve more candidates for reranking
+                        "filter": filter_dict
+                    }
+                )
         
         # Add reranking if enabled
         if use_reranking and os.environ.get("COHERE_API_KEY"):
