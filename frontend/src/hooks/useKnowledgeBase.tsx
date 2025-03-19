@@ -1,5 +1,5 @@
 // hooks/useKnowledgeBase.tsx
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { useAppContext } from '../contexts/AppContext';
 import { API_URL, KnowledgeItem } from '../types';
 
@@ -12,11 +12,29 @@ export const useKnowledgeBase = () => {
     searchQuery,
     knowledgeItems
   } = useAppContext();
+  
+  // Use a ref to track if documents are currently being loaded
+  const isLoadingRef = useRef(false);
+  // Use a ref to track when documents were last loaded
+  const lastLoadTimeRef = useRef(0);
+  // Debounce time in milliseconds (5 seconds)
+  const DEBOUNCE_TIME = 5000;
 
   // Load documents from backend - using useCallback to ensure stable function reference
-  const loadDocuments = useCallback(async () => {
+  const loadDocuments = useCallback(async (force = false) => {
+    // Skip if already loading or if last load was too recent (unless forced)
+    const now = Date.now();
+    if (
+      isLoadingRef.current || 
+      (!force && now - lastLoadTimeRef.current < DEBOUNCE_TIME)
+    ) {
+      return;
+    }
+    
     try {
+      isLoadingRef.current = true;
       setIsLoading(true);
+      
       const token = localStorage.getItem('auth_token');
       const response = await fetch(`${API_URL}/documents`, {
         headers: {
@@ -46,11 +64,15 @@ export const useKnowledgeBase = () => {
         
         setKnowledgeItems(loadedItems);
       }
+      
+      // Update last load time
+      lastLoadTimeRef.current = Date.now();
     } catch (e) {
       console.error('Error loading documents:', e);
       setError('Failed to load documents from the server.');
     } finally {
       setIsLoading(false);
+      isLoadingRef.current = false;
     }
   }, [setKnowledgeItems, setIsLoading, setError]);
 
@@ -128,10 +150,17 @@ export const useKnowledgeBase = () => {
     }
   };
 
-  // Load documents on initial render
+  // Load documents only once on initial render
   useEffect(() => {
-    loadDocuments();
-  }, [loadDocuments]); // Safe to include loadDocuments in dependency array now that it's memoized with useCallback
+    loadDocuments(true); // Force load on initial render
+    
+    // Set up a refresh interval (optional, every 30 seconds)
+    const intervalId = setInterval(() => {
+      loadDocuments();
+    }, 30000);
+    
+    return () => clearInterval(intervalId);
+  }, []); // Empty dependency array to ensure it only runs once
 
   return {
     loadDocuments,

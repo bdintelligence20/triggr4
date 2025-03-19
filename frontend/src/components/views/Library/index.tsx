@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import LibraryHeader from './LibraryHeader';
 import FileList from './FileList';
 import UploadModal from './UploadModal';
@@ -13,10 +13,7 @@ const Library = () => {
   const { loadDocuments } = useKnowledgeBase();
   const { knowledgeItems } = useAppContext();
 
-  // Load documents on component mount
-  useEffect(() => {
-    loadDocuments();
-  }, [loadDocuments]);
+  // Note: Document loading is now handled by the useKnowledgeBase hook
 
   return (
     <div className="p-6">

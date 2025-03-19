@@ -1,5 +1,5 @@
 // components/library/LibraryPanel.tsx
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Upload } from 'lucide-react';
 import KnowledgeGrid from './KnowledgeGrid';
 import FileUploader from './FileUploader';
@@ -12,12 +12,7 @@ const LibraryPanel: React.FC = () => {
     processingProgress 
   } = useAppContext();
   
-  const { loadDocuments } = useKnowledgeBase();
-  
-  // Reload documents when component mounts
-  useEffect(() => {
-    loadDocuments();
-  }, [loadDocuments]);
+  // Note: Document loading is now handled by the useKnowledgeBase hook
 
   return (
     <div>

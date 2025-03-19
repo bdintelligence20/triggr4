@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Folder, File, Search, Plus, Trash } from 'lucide-react';
 import FileUploader from '../../../library/FileUploader';
 import { useKnowledgeBase } from '../../../../hooks/useKnowledgeBase';
@@ -9,7 +9,7 @@ interface HubLibraryProps {
 }
 
 const HubLibrary: React.FC<HubLibraryProps> = ({ hubId }) => {
-  const { loadDocuments, deleteKnowledgeItem } = useKnowledgeBase();
+  const { deleteKnowledgeItem } = useKnowledgeBase();
   const { 
     knowledgeItems, 
     isProcessingFile, 
@@ -21,10 +21,7 @@ const HubLibrary: React.FC<HubLibraryProps> = ({ hubId }) => {
     categories
   } = useAppContext();
 
-  // Load documents on component mount
-  useEffect(() => {
-    loadDocuments();
-  }, [loadDocuments]);
+  // Note: Document loading is now handled by the useKnowledgeBase hook
 
   return (
     <div className="space-y-6">
