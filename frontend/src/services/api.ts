@@ -188,3 +188,35 @@ export async function validateToken(): Promise<ApiResponse<any>> {
     method: 'POST',
   });
 }
+
+// Chat History API functions
+
+// Get chat history
+export async function getChatHistory(): Promise<ApiResponse<{sessions: any[]}>> {
+  return fetchApi<{sessions: any[]}>('/chat/history', {
+    method: 'GET',
+  });
+}
+
+// Get chat session
+export async function getChatSession(sessionId: string): Promise<ApiResponse<any>> {
+  return fetchApi<any>(`/chat/session/${sessionId}`, {
+    method: 'GET',
+  });
+}
+
+// Save chat session
+export async function saveChatSession(data: {
+  session_id?: string;
+  title: string;
+  messages: any[];
+  category: string;
+}): Promise<ApiResponse<{session_id: string}>> {
+  return fetchApi<{session_id: string}>('/chat/save', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+}

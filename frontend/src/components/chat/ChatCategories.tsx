@@ -2,6 +2,7 @@
 import React from 'react';
 import { FileText, File } from 'lucide-react';
 import { useAppContext } from '../../contexts/AppContext';
+import ChatHistory from './ChatHistory';
 
 const ChatCategories: React.FC = () => {
   const { 
@@ -48,6 +49,9 @@ const ChatCategories: React.FC = () => {
           </button>
         ))}
       </div>
+      
+      {/* Chat History section directly below Knowledge Sources */}
+      <ChatHistory />
     </div>
   );
 };

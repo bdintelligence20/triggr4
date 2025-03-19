@@ -1,5 +1,5 @@
 // hooks/useKnowledgeBase.tsx
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useAppContext } from '../contexts/AppContext';
 import { API_URL, KnowledgeItem } from '../types';
 
@@ -13,8 +13,8 @@ export const useKnowledgeBase = () => {
     knowledgeItems
   } = useAppContext();
 
-  // Load documents from backend
-  const loadDocuments = async () => {
+  // Load documents from backend - using useCallback to ensure stable function reference
+  const loadDocuments = useCallback(async () => {
     try {
       setIsLoading(true);
       const token = localStorage.getItem('auth_token');
@@ -52,7 +52,7 @@ export const useKnowledgeBase = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [setKnowledgeItems, setIsLoading, setError]);
 
   // Delete a knowledge item
   const deleteKnowledgeItem = async (id: string) => {
@@ -131,7 +131,7 @@ export const useKnowledgeBase = () => {
   // Load documents on initial render
   useEffect(() => {
     loadDocuments();
-  }, []);
+  }, [loadDocuments]); // Safe to include loadDocuments in dependency array now that it's memoized with useCallback
 
   return {
     loadDocuments,

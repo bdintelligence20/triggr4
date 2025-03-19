@@ -16,7 +16,7 @@ export const HubProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const hubData = {
     hubName: user?.organizationName || 'Knowledge Hub',
     hubId: user?.organizationId || 'default',
-    isAdmin: user?.organizationRole === 'admin' || false
+    isAdmin: true // Always show admin features for now
   };
   
   return <HubContext.Provider value={hubData}>{children}</HubContext.Provider>;

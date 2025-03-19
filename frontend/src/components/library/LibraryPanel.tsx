@@ -17,7 +17,7 @@ const LibraryPanel: React.FC = () => {
   // Reload documents when component mounts
   useEffect(() => {
     loadDocuments();
-  }, []);
+  }, [loadDocuments]);
 
   return (
     <div>
