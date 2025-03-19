@@ -1,7 +1,7 @@
 // hooks/useFileUpload.tsx
 import { useRef } from 'react';
 import { useAppContext } from '../contexts/AppContext';
-import { API_URL, UploadResponse } from '../types';
+import { API_URL, UploadResponse, KnowledgeItem } from '../types';
 
 export const useFileUpload = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -46,8 +46,12 @@ export const useFileUpload = () => {
         
         // Send file to backend
         console.log(`Uploading file to ${API_URL}/upload`);
+        const token = localStorage.getItem('auth_token');
         const response = await fetch(`${API_URL}/upload`, {
           method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
           body: formData,
         });
         
@@ -75,7 +79,8 @@ export const useFileUpload = () => {
           processing_status: 'completed'
         };
         
-        setKnowledgeItems(prev => [...prev, newItem]);
+        // Add to knowledge items
+        setKnowledgeItems((currentItems: any[]) => [...currentItems, newItem]);
         setProcessingProgress(((i + 1) / files.length) * 100);
         
         // Show notification

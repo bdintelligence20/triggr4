@@ -5,6 +5,7 @@ import { useAppContext } from '../../contexts/AppContext';
 import KnowledgeItem from './KnowledgeItem';
 import { useFileUpload } from '../../hooks/useFileUpload';
 import { useKnowledgeBase } from '../../hooks/useKnowledgeBase';
+import { API_URL, KnowledgeItem as KnowledgeItemType } from '../../types';
 
 const KnowledgeGrid: React.FC = () => {
   const {
@@ -27,7 +28,10 @@ const KnowledgeGrid: React.FC = () => {
       
       // Call API to delete
       const response = await fetch(`${API_URL}/delete/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+        }
       });
       
       if (!response.ok) {
@@ -36,7 +40,8 @@ const KnowledgeGrid: React.FC = () => {
       }
       
       // Remove from local state
-      setKnowledgeItems(prev => prev.filter(item => item.id !== id));
+      const updatedItems = filteredKnowledgeItems.filter(item => item.id !== id);
+      setKnowledgeItems(updatedItems);
       
       // Show notification
       showNotification("Item deleted successfully");

@@ -17,7 +17,12 @@ export const useKnowledgeBase = () => {
   const loadDocuments = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(`${API_URL}/documents`);
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${API_URL}/documents`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       
       if (!response.ok) {
         console.error('Failed to load documents, status:', response.status);
@@ -55,8 +60,12 @@ export const useKnowledgeBase = () => {
       setIsLoading(true);
       
       // Call API to delete
+      const token = localStorage.getItem('auth_token');
       const response = await fetch(`${API_URL}/delete/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
       });
       
       if (!response.ok) {
