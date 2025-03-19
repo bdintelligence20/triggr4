@@ -1,238 +1,171 @@
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X, TrendingUp, ArrowUp, ArrowDown, Filter, Calendar, AlertCircle } from 'lucide-react';
-import { Button } from '../../ui/button';
+import React from 'react';
+import { X, ArrowUp, ArrowDown, AlertTriangle, CheckCircle, Info } from 'lucide-react';
 
-interface Trend {
+interface TrendingIssue {
   id: string;
   title: string;
   department: string;
-  reportCount: number;
   trend: number;
+  requests: number;
   timeframe: string;
+  priority: 'high' | 'medium' | 'low';
+  relatedIssues?: TrendingIssue[];
   commonCauses?: string[];
   preventiveMeasures?: string[];
-  lastOccurrence?: string;
 }
 
 interface ViewTrendsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  trends: Trend[];
+  issue: TrendingIssue;
 }
 
 const ViewTrendsModal: React.FC<ViewTrendsModalProps> = ({
   isOpen,
   onClose,
-  trends
+  issue
 }) => {
-  const [selectedTimeframe, setSelectedTimeframe] = useState<'7d' | '30d' | '90d'>('7d');
-  const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
-  const [expandedTrend, setExpandedTrend] = useState<string | null>(null);
-
   if (!isOpen) return null;
 
-  const filteredTrends = trends.filter(trend => 
-    selectedDepartment === 'all' || trend.department === selectedDepartment
-  );
+  const getTrendColor = (trend: number) => {
+    if (trend > 20) return 'text-red-600';
+    if (trend > 0) return 'text-yellow-600';
+    return 'text-green-600';
+  };
 
-  const getDepartmentColor = (department: string) => {
-    switch (department) {
-      case 'HR':
-        return 'bg-purple-50 text-purple-600';
-      case 'IT':
-        return 'bg-blue-50 text-blue-600';
-      case 'Operations':
-        return 'bg-emerald-50 text-emerald-600';
-      case 'Safety':
-        return 'bg-red-50 text-red-600';
+  const getPriorityIcon = (priority: string) => {
+    switch (priority) {
+      case 'high':
+        return <AlertTriangle className="text-red-500" size={18} />;
+      case 'medium':
+        return <Info className="text-yellow-500" size={18} />;
+      case 'low':
+        return <CheckCircle className="text-green-500" size={18} />;
       default:
-        return 'bg-gray-50 text-gray-600';
+        return null;
     }
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 overflow-y-auto"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="fixed inset-0 bg-black/50" />
-      <div className="relative min-h-screen flex items-center justify-center p-4">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 20 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          transition={{ type: "spring", duration: 0.5 }}
-          className="relative bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden"
-        >
-          {/* Header */}
-          <div className="p-6 border-b">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-emerald-50 rounded-lg">
-                  <TrendingUp className="text-emerald-500" size={24} />
-                </div>
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900">View Trends</h2>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Analyze and track recurring issues across departments
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={onClose}
-                className="p-2 text-gray-400 hover:text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <X size={20} />
-              </button>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between p-6 border-b">
+          <div className="flex items-center gap-3">
+            {getPriorityIcon(issue.priority)}
+            <h2 className="text-xl font-semibold">{issue.title}</h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+          >
+            <X size={20} />
+          </button>
+        </div>
+        
+        <div className="p-6 overflow-y-auto flex-1">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <p className="text-sm text-gray-500 mb-1">Department</p>
+              <p className="font-medium">{issue.department}</p>
             </div>
-
-            <div className="flex flex-wrap items-center gap-4 mt-6">
-              <div className="flex items-center gap-2">
-                <Filter size={16} className="text-gray-400" />
-                <span className="text-sm font-medium text-gray-700">Filters:</span>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <p className="text-sm text-gray-500 mb-1">Requests</p>
+              <p className="font-medium">{issue.requests} in {issue.timeframe}</p>
+            </div>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <p className="text-sm text-gray-500 mb-1">Trend</p>
+              <div className="flex items-center gap-1">
+                {issue.trend > 0 ? (
+                  <ArrowUp size={16} className={getTrendColor(issue.trend)} />
+                ) : (
+                  <ArrowDown size={16} className={getTrendColor(issue.trend)} />
+                )}
+                <span className={`font-medium ${getTrendColor(issue.trend)}`}>
+                  {Math.abs(issue.trend)}%
+                </span>
               </div>
-
-              <select
-                value={selectedTimeframe}
-                onChange={(e) => setSelectedTimeframe(e.target.value as '7d' | '30d' | '90d')}
-                className="px-3 py-1.5 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
-              >
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-                <option value="90d">Last quarter</option>
-              </select>
-
-              <select
-                value={selectedDepartment}
-                onChange={(e) => setSelectedDepartment(e.target.value)}
-                className="px-3 py-1.5 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
-              >
-                <option value="all">All Departments</option>
-                <option value="HR">HR</option>
-                <option value="IT">IT</option>
-                <option value="Operations">Operations</option>
-                <option value="Safety">Safety</option>
-              </select>
             </div>
           </div>
-
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto">
-            <div className="p-6 space-y-4">
-              {filteredTrends.map((trend) => (
-                <motion.div
-                  key={trend.id}
-                  layout
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  className="border rounded-lg overflow-hidden"
-                >
-                  <div
-                    onClick={() => setExpandedTrend(expandedTrend === trend.id ? null : trend.id)}
-                    className="p-4 bg-white hover:bg-gray-50 cursor-pointer"
+          
+          {issue.commonCauses && (
+            <div className="mb-8">
+              <h3 className="text-lg font-medium mb-4">Common Causes</h3>
+              <ul className="space-y-2">
+                {issue.commonCauses.map((cause, index) => (
+                  <li key={index} className="flex items-start gap-2">
+                    <div className="p-1 bg-blue-50 rounded-full mt-0.5">
+                      <div className="w-2 h-2 bg-blue-400 rounded-full" />
+                    </div>
+                    <span>{cause}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          
+          {issue.preventiveMeasures && (
+            <div className="mb-8">
+              <h3 className="text-lg font-medium mb-4">Preventive Measures</h3>
+              <ul className="space-y-2">
+                {issue.preventiveMeasures.map((measure, index) => (
+                  <li key={index} className="flex items-start gap-2">
+                    <div className="p-1 bg-emerald-50 rounded-full mt-0.5">
+                      <div className="w-2 h-2 bg-emerald-400 rounded-full" />
+                    </div>
+                    <span>{measure}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          
+          {issue.relatedIssues && issue.relatedIssues.length > 0 && (
+            <div>
+              <h3 className="text-lg font-medium mb-4">Related Issues</h3>
+              <div className="space-y-3">
+                {issue.relatedIssues.map((relatedIssue) => (
+                  <div 
+                    key={relatedIssue.id}
+                    className="p-4 border rounded-lg hover:border-emerald-200 transition-colors"
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-gray-50 rounded-lg">
-                          <AlertCircle size={20} className="text-gray-400" />
-                        </div>
-                        <div>
-                          <h3 className="font-medium text-gray-900">{trend.title}</h3>
-                          <div className="flex items-center gap-3 mt-1">
-                            <span className={`px-2 py-1 rounded-full text-xs ${getDepartmentColor(trend.department)}`}>
-                              {trend.department}
-                            </span>
-                            <span className="text-sm text-gray-500">
-                              {trend.reportCount} reports in {trend.timeframe}
-                            </span>
-                          </div>
-                        </div>
+                      <div className="flex items-center gap-2">
+                        {getPriorityIcon(relatedIssue.priority)}
+                        <h4 className="font-medium">{relatedIssue.title}</h4>
                       </div>
-                      <div className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm ${
-                        trend.trend > 0 
-                          ? 'bg-red-50 text-red-600' 
-                          : 'bg-green-50 text-green-600'
-                      }`}>
-                        {trend.trend > 0 ? (
-                          <ArrowUp size={16} />
+                      <div className="flex items-center gap-1">
+                        {relatedIssue.trend > 0 ? (
+                          <ArrowUp size={14} className={getTrendColor(relatedIssue.trend)} />
                         ) : (
-                          <ArrowDown size={16} />
+                          <ArrowDown size={14} className={getTrendColor(relatedIssue.trend)} />
                         )}
-                        <span>{Math.abs(trend.trend)}%</span>
+                        <span className={`text-sm font-medium ${getTrendColor(relatedIssue.trend)}`}>
+                          {Math.abs(relatedIssue.trend)}%
+                        </span>
                       </div>
                     </div>
+                    <div className="flex items-center gap-3 mt-2 text-sm text-gray-500">
+                      <span>{relatedIssue.department}</span>
+                      <span>•</span>
+                      <span>{relatedIssue.requests} requests</span>
+                    </div>
                   </div>
-
-                  <AnimatePresence>
-                    {expandedTrend === trend.id && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="border-t bg-gray-50"
-                      >
-                        <div className="p-4 space-y-4">
-                          {trend.commonCauses && (
-                            <div>
-                              <h4 className="text-sm font-medium text-gray-900 mb-2">Common Causes</h4>
-                              <ul className="list-disc list-inside text-sm text-gray-600 space-y-1">
-                                {trend.commonCauses.map((cause, index) => (
-                                  <li key={index}>{cause}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-
-                          {trend.preventiveMeasures && (
-                            <div>
-                              <h4 className="text-sm font-medium text-gray-900 mb-2">Preventive Measures</h4>
-                              <ul className="list-disc list-inside text-sm text-gray-600 space-y-1">
-                                {trend.preventiveMeasures.map((measure, index) => (
-                                  <li key={index}>{measure}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-
-                          {trend.lastOccurrence && (
-                            <div className="text-sm text-gray-500">
-                              Last occurrence: {new Date(trend.lastOccurrence).toLocaleString()}
-                            </div>
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="p-4 border-t bg-gray-50">
-            <div className="flex justify-between items-center">
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <Calendar size={16} />
-                <span>Last updated: {new Date().toLocaleString()}</span>
+                ))}
               </div>
-              <Button
-                variant="outline"
-                onClick={onClose}
-              >
-                Close
-              </Button>
             </div>
-          </div>
-        </motion.div>
+          )}
+        </div>
+        
+        <div className="p-6 border-t bg-gray-50 flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+          >
+            Close
+          </button>
+        </div>
       </div>
-    </motion.div>
+    </div>
   );
 };
 

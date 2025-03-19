@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { TrendingUp, ArrowUp, ArrowDown } from 'lucide-react';
 import useRoleStore from '../../../store/roleStore';
-import TrendingIssuesModal from '../../issues/TrendingIssuesModal';
+import ViewTrendsModal from './ViewTrendsModal';
 
 interface TrendingIssue {
   id: string;
@@ -239,7 +239,7 @@ const TrendingIssues = () => {
       </div>
 
       {selectedIssue && (
-        <TrendingIssuesModal
+        <ViewTrendsModal
           isOpen={true}
           onClose={() => setSelectedIssue(null)}
           issue={selectedIssue}
