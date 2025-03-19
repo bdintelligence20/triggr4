@@ -132,21 +132,31 @@ class LangChainRAG:
             try:
                 logger.warning(f"Official PineconeHybridSearchRetriever not available, trying custom hybrid: {str(e)}")
                 # Use our custom hybrid search implementation
-                docs_retriever = lambda query: self.vector_store.hybrid_search(
-                    query=query,
-                    k=10,  # Retrieve more candidates for reranking
-                    filter_dict=filter_dict
-                )
+                from langchain.retrievers.base import BaseRetriever
+                from langchain.callbacks.manager import CallbackManagerForRetrieverRun
                 
-                # Create a custom retriever that uses our hybrid search
-                class CustomHybridSearchRetriever:
-                    def __init__(self, search_func):
-                        self.search_func = search_func
+                # Create a custom retriever that inherits from BaseRetriever
+                class CustomHybridSearchRetriever(BaseRetriever):
+                    def __init__(self, vector_store, filter_dict=None, k=10):
+                        super().__init__()
+                        self.vector_store = vector_store
+                        self.filter_dict = filter_dict
+                        self.k = k
                     
-                    def get_relevant_documents(self, query):
-                        return self.search_func(query)
+                    def _get_relevant_documents(
+                        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+                    ):
+                        return self.vector_store.hybrid_search(
+                            query=query,
+                            k=self.k,
+                            filter_dict=self.filter_dict
+                        )
                 
-                base_retriever = CustomHybridSearchRetriever(docs_retriever)
+                base_retriever = CustomHybridSearchRetriever(
+                    vector_store=self.vector_store,
+                    filter_dict=filter_dict,
+                    k=10
+                )
                 logger.info("Using custom hybrid search retriever")
             except Exception as e2:
                 # Fallback to standard similarity search if both hybrid search methods fail
