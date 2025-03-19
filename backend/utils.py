@@ -10,6 +10,27 @@ def allowed_file(filename: str, allowed_extensions: set) -> bool:
     """Check if a file has an allowed extension."""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
+def get_user_id():
+    """Get the user ID for the authenticated user."""
+    auth_header = request.headers.get('Authorization')
+    
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return None
+    
+    token = auth_header.split(' ')[1]
+    
+    try:
+        # Verify token
+        from auth_routes import verify_token
+        payload = verify_token(token)
+        if not payload:
+            return None
+        
+        return payload.get('user_id')
+    except Exception as e:
+        logger.error(f"Error getting user ID: {str(e)}")
+        return None
+
 def get_user_organization_id():
     """Get the organization ID for the authenticated user."""
     auth_header = request.headers.get('Authorization')

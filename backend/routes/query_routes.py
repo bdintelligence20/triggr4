@@ -116,6 +116,151 @@ def query():
         traceback.print_exc()
         return jsonify({"error": f"Failed to process query: {str(e)}", "status": "error"}), 500
 
+@query_bp.route('/chat/history', methods=['GET'])
+def get_chat_history():
+    """Get chat history for the current user."""
+    # Get organization ID and user ID from authenticated user
+    organization_id = get_user_organization_id()
+    user_id = get_user_id()
+    
+    # Enforce organization ID requirement for multi-tenant isolation
+    if not organization_id:
+        logger.error("Organization ID is required for chat history")
+        return jsonify({"error": "Organization ID is required. Please ensure you are properly authenticated and assigned to an organization."}), 403
+    
+    if not user_id:
+        logger.error("User ID is required for chat history")
+        return jsonify({"error": "User ID is required. Please ensure you are properly authenticated."}), 403
+    
+    try:
+        # Query Firestore for chat sessions
+        query = db.collection("organizations").document(organization_id) \
+                .collection("users").document(user_id) \
+                .collection("chat_sessions").order_by("updated_at", direction=firestore.Query.DESCENDING)
+        
+        # Execute query
+        sessions = query.stream()
+        
+        # Format results
+        results = []
+        for session in sessions:
+            session_data = session.to_dict()
+            results.append({
+                "id": session.id,
+                "title": session_data.get("title", "Untitled Chat"),
+                "last_message": session_data.get("last_message", ""),
+                "updated_at": session_data.get("updated_at"),
+                "created_at": session_data.get("created_at"),
+                "category": session_data.get("category", "general"),
+                "message_count": len(session_data.get("messages", []))
+            })
+        
+        return jsonify({"sessions": results})
+    except Exception as e:
+        logger.error(f"Chat history error: {str(e)}")
+        return jsonify({"error": f"Failed to retrieve chat history: {str(e)}"}), 500
+
+@query_bp.route('/chat/save', methods=['POST'])
+def save_chat_session():
+    """Save a chat session."""
+    data = request.get_json()
+    session_id = data.get("session_id")
+    title = data.get("title", "Untitled Chat")
+    messages = data.get("messages", [])
+    category = data.get("category", "general")
+    
+    # Get organization ID and user ID from authenticated user
+    organization_id = get_user_organization_id()
+    user_id = get_user_id()
+    
+    # Enforce organization ID requirement for multi-tenant isolation
+    if not organization_id:
+        logger.error("Organization ID is required for saving chat session")
+        return jsonify({"error": "Organization ID is required. Please ensure you are properly authenticated and assigned to an organization."}), 403
+    
+    if not user_id:
+        logger.error("User ID is required for saving chat session")
+        return jsonify({"error": "User ID is required. Please ensure you are properly authenticated."}), 403
+    
+    try:
+        # Create or update chat session
+        if session_id:
+            # Update existing session
+            session_ref = db.collection("organizations").document(organization_id) \
+                            .collection("users").document(user_id) \
+                            .collection("chat_sessions").document(session_id)
+        else:
+            # Create new session
+            session_ref = db.collection("organizations").document(organization_id) \
+                            .collection("users").document(user_id) \
+                            .collection("chat_sessions").document()
+            session_id = session_ref.id
+        
+        # Prepare session data
+        last_message = messages[-1]["content"] if messages else ""
+        session_data = {
+            "title": title,
+            "messages": messages,
+            "category": category,
+            "last_message": last_message,
+            "updated_at": firestore.SERVER_TIMESTAMP
+        }
+        
+        # Add created_at for new sessions
+        if not session_ref.get().exists:
+            session_data["created_at"] = firestore.SERVER_TIMESTAMP
+        
+        # Save session
+        session_ref.set(session_data, merge=True)
+        
+        return jsonify({
+            "message": "Chat session saved successfully",
+            "session_id": session_id
+        })
+    except Exception as e:
+        logger.error(f"Save chat session error: {str(e)}")
+        return jsonify({"error": f"Failed to save chat session: {str(e)}"}), 500
+
+@query_bp.route('/chat/session/<session_id>', methods=['GET'])
+def get_chat_session(session_id):
+    """Get a specific chat session."""
+    # Get organization ID and user ID from authenticated user
+    organization_id = get_user_organization_id()
+    user_id = get_user_id()
+    
+    # Enforce organization ID requirement for multi-tenant isolation
+    if not organization_id:
+        logger.error("Organization ID is required for retrieving chat session")
+        return jsonify({"error": "Organization ID is required. Please ensure you are properly authenticated and assigned to an organization."}), 403
+    
+    if not user_id:
+        logger.error("User ID is required for retrieving chat session")
+        return jsonify({"error": "User ID is required. Please ensure you are properly authenticated."}), 403
+    
+    try:
+        # Get chat session
+        session_ref = db.collection("organizations").document(organization_id) \
+                        .collection("users").document(user_id) \
+                        .collection("chat_sessions").document(session_id)
+        session = session_ref.get()
+        
+        if not session.exists:
+            return jsonify({"error": "Chat session not found"}), 404
+        
+        session_data = session.to_dict()
+        
+        return jsonify({
+            "id": session.id,
+            "title": session_data.get("title", "Untitled Chat"),
+            "messages": session_data.get("messages", []),
+            "category": session_data.get("category", "general"),
+            "updated_at": session_data.get("updated_at"),
+            "created_at": session_data.get("created_at")
+        })
+    except Exception as e:
+        logger.error(f"Get chat session error: {str(e)}")
+        return jsonify({"error": f"Failed to retrieve chat session: {str(e)}"}), 500
+
 @query_bp.route('/evaluate', methods=['POST'])
 def evaluate_rag():
     """Evaluate RAG system performance."""
