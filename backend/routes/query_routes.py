@@ -33,7 +33,12 @@ def query():
     # Get organization ID from authenticated user
     organization_id = get_user_organization_id()
     
-    logger.info(f"Query received: '{query_text}', category: '{category}', stream: {stream_enabled}, organization: {organization_id or 'global'}")
+    # Enforce organization ID requirement for multi-tenant isolation
+    if not organization_id:
+        logger.error("Organization ID is required for querying")
+        return jsonify({"error": "Organization ID is required. Please ensure you are properly authenticated and assigned to an organization."}), 403
+    
+    logger.info(f"Query received: '{query_text}', category: '{category}', stream: {stream_enabled}, organization: {organization_id}")
     
     if not query_text or not isinstance(query_text, str) or len(query_text.strip()) < 2:
         return jsonify({"error": "Invalid or empty query"}), 400
@@ -126,6 +131,11 @@ def evaluate_rag():
         
         # Get organization ID from authenticated user
         organization_id = get_user_organization_id()
+        
+        # Enforce organization ID requirement for multi-tenant isolation
+        if not organization_id:
+            logger.error("Organization ID is required for evaluation")
+            return jsonify({"error": "Organization ID is required. Please ensure you are properly authenticated and assigned to an organization."}), 403
         
         # Initialize evaluator
         evaluator = RAGEvaluator(

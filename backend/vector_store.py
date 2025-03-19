@@ -15,7 +15,8 @@ class EnhancedPineconeStore:
     def __init__(self, api_key: str, index_name: str, organization_id: Optional[str] = None):
         self.api_key = api_key
         self.index_name = index_name
-        self.organization_id = organization_id
+        # Convert None to empty string for organization_id to avoid Pinecone errors
+        self.organization_id = organization_id if organization_id is not None else ""
         self.embedding_model = OpenAIEmbeddings(
             model="text-embedding-3-large",
             openai_api_key=os.environ.get("OPENAI_API_KEY")
@@ -52,10 +53,9 @@ class EnhancedPineconeStore:
     
     def _get_namespace(self) -> str:
         """Get the appropriate namespace based on organization_id."""
-        if self.organization_id:
-            return f"org_{self.organization_id}"
-        else:
-            return "global_knowledge_base"
+        if not self.organization_id:
+            raise ValueError("Organization ID is required for multi-tenant isolation. No fallback to global namespace is allowed.")
+        return f"org_{self.organization_id}"
     
     def add_documents(self, documents: List[Document], batch_size: int = 10) -> int:
         """Add documents to the vector store."""

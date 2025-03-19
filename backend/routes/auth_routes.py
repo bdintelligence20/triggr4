@@ -4,6 +4,8 @@ import time
 import logging
 from flask import Blueprint, request, jsonify
 from firebase_admin import auth, firestore, exceptions
+from pinecone import Pinecone as PineconeClient
+from vector_store import EnhancedPineconeStore
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -322,6 +324,57 @@ def create_organization():
             'organizationRole': 'admin',
             'updatedAt': firestore.SERVER_TIMESTAMP
         })
+        
+        # Initialize Pinecone namespace for the new organization
+        try:
+            # Get Pinecone API key from environment
+            pinecone_api_key = os.environ.get("PINECONE_API_KEY")
+            pinecone_index_name = os.environ.get("PINECONE_INDEX_NAME", "knowledge-hub-vectors")
+            
+            if pinecone_api_key:
+                # Initialize Pinecone client
+                pc = PineconeClient(api_key=pinecone_api_key)
+                
+                # Initialize vector store with the new organization ID
+                vector_store = EnhancedPineconeStore(
+                    api_key=pinecone_api_key,
+                    index_name=pinecone_index_name,
+                    organization_id=org_id
+                )
+                
+                # Create a dummy document to initialize the namespace
+                # This is a workaround since Pinecone namespaces are created implicitly
+                # when data is inserted
+                dummy_doc = {
+                    "id": f"org_init_{org_id}",
+                    "values": [0.0] * 3072,  # Dimension for text-embedding-3-large
+                    "metadata": {
+                        "text": "Organization namespace initialization",
+                        "source_id": "system",
+                        "category": "system",
+                        "organization_id": org_id
+                    }
+                }
+                
+                # Get the index
+                index = pc.Index(pinecone_index_name)
+                
+                # Insert the dummy document to create the namespace
+                namespace = f"org_{org_id}"
+                index.upsert(
+                    vectors=[dummy_doc],
+                    namespace=namespace
+                )
+                
+                logger.info(f"Initialized Pinecone namespace for organization: {org_id}")
+                
+                # Delete the dummy document
+                index.delete(ids=[dummy_doc["id"]], namespace=namespace)
+            else:
+                logger.warning("Pinecone API key not found, skipping namespace initialization")
+        except Exception as e:
+            # Log the error but don't fail the organization creation
+            logger.error(f"Error initializing Pinecone namespace: {str(e)}")
         
         return jsonify({
             'message': 'Organization created successfully',

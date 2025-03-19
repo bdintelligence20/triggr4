@@ -40,7 +40,13 @@ def upload_document():
     
     # Get organization ID from authenticated user
     organization_id = get_user_organization_id()
-    logger.info(f"Upload request for organization: {organization_id or 'global'}")
+    
+    # Enforce organization ID requirement for multi-tenant isolation
+    if not organization_id:
+        logger.error("Organization ID is required for document upload")
+        return jsonify({"error": "Organization ID is required. Please ensure you are properly authenticated and assigned to an organization."}), 403
+    
+    logger.info(f"Upload request for organization: {organization_id}")
     
     if 'file' not in request.files:
         logger.info("No file in request")
@@ -172,6 +178,11 @@ def list_documents():
         # Get organization ID from authenticated user
         organization_id = get_user_organization_id()
         
+        # Enforce organization ID requirement for multi-tenant isolation
+        if not organization_id:
+            logger.error("Organization ID is required for listing documents")
+            return jsonify({"error": "Organization ID is required. Please ensure you are properly authenticated and assigned to an organization."}), 403
+        
         # Build query
         query = db.collection("knowledge_items")
         
@@ -179,9 +190,8 @@ def list_documents():
         if category:
             query = query.where("category", "==", category)
             
-        # Filter by organization if available
-        if organization_id:
-            query = query.where("organizationId", "==", organization_id)
+        # Filter by organization
+        query = query.where("organizationId", "==", organization_id)
         
         # Execute query
         docs = query.limit(limit).stream()
@@ -224,8 +234,24 @@ def delete_document(item_id):
             
         doc_data = doc.to_dict()
         
-        # Get organization ID from the document or from the authenticated user
-        organization_id = doc_data.get("organizationId") or get_user_organization_id()
+        # Get organization ID from authenticated user
+        user_org_id = get_user_organization_id()
+        
+        # Enforce organization ID requirement for multi-tenant isolation
+        if not user_org_id:
+            logger.error("Organization ID is required for deleting documents")
+            return jsonify({"error": "Organization ID is required. Please ensure you are properly authenticated and assigned to an organization."}), 403
+        
+        # Get organization ID from the document
+        doc_org_id = doc_data.get("organizationId")
+        
+        # Ensure the document belongs to the user's organization
+        if doc_org_id != user_org_id:
+            logger.error(f"Unauthorized: User from organization {user_org_id} attempted to delete document from organization {doc_org_id}")
+            return jsonify({"error": "You are not authorized to delete this document"}), 403
+        
+        # Use the document's organization ID
+        organization_id = doc_org_id
         
         # Initialize vector store
         vector_store = EnhancedPineconeStore(

@@ -75,10 +75,14 @@ class LangChainRAG:
             
             # Add metadata
             for doc in documents:
+                # Convert None to empty string for organization_id to avoid Pinecone error
+                # Pinecone doesn't accept None as a metadata value
+                org_id = self.organization_id if self.organization_id is not None else ""
+                
                 doc.metadata.update({
                     "source_id": source_id,
                     "category": category,
-                    "organization_id": self.organization_id
+                    "organization_id": org_id
                 })
             
             # Split into chunks
