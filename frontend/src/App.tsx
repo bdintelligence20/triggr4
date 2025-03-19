@@ -20,6 +20,7 @@ import ChatPanel from './components/chat/ChatPanel';
 import IntegrationPanel from './components/integration/IntegrationPanel';
 
 // New view components
+import MainLayout from './components/views/layout/MainLayout';
 import DashboardView from './components/views/Dashboard';
 import HubDetails from './components/views/HubDetails';
 import Chat from './components/views/Chat';
@@ -44,12 +45,14 @@ const App: React.FC = () => {
                 <Route path="/reset-password/:token" element={<ResetPassword />} />
                 <Route path="/onboarding" element={<OnboardingFlow />} />
                 
-                {/* Protected Routes - Using New Views */}
+                {/* Protected Routes - Using New Views with MainLayout */}
                 <Route element={<ProtectedRoute />}>
-                  <Route path="/dashboard" element={<DashboardView />} />
-                  <Route path="/hub" element={<HubDetails />} />
-                  <Route path="/chat" element={<Chat />} />
-                  <Route path="/library" element={<Library />} />
+                  <Route element={<MainLayout />}>
+                    <Route path="/dashboard" element={<DashboardView />} />
+                    <Route path="/hub" element={<HubDetails />} />
+                    <Route path="/chat" element={<Chat />} />
+                    <Route path="/library" element={<Library />} />
+                  </Route>
                 </Route>
                 
                 {/* Legacy Routes - Original Components (kept for reference) */}

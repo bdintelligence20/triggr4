@@ -62,12 +62,12 @@ const Sidebar: React.FC = () => {
           {/* New Views */}
           <div className="mb-4">
             <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-              New Views
+              Main Navigation
             </div>
             <Link
-              to="/new-dashboard"
+              to="/dashboard"
               className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
-                isActive('/new-dashboard') 
+                isActive('/dashboard') 
                   ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
                   : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
               }`}
@@ -89,9 +89,9 @@ const Sidebar: React.FC = () => {
             </Link>
             
             <Link
-              to="/new-library"
+              to="/library"
               className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
-                isActive('/new-library') 
+                isActive('/library') 
                   ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
                   : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
               }`}
@@ -157,23 +157,13 @@ const Sidebar: React.FC = () => {
         
         {/* Bottom buttons */}
         <div className="px-4 mt-auto pb-4 space-y-2">
-          <div className="flex space-x-2">
-            <Link
-              to="/dashboard/chat"
-              className="flex-1 flex items-center justify-center px-3 py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
-            >
-              <MessageSquare size={20} className="mr-2" />
-              <span>Chat</span>
-            </Link>
-            
-            <Link
-              to="/new-chat"
-              className="flex-1 flex items-center justify-center px-3 py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
-            >
-              <MessageSquare size={20} className="mr-2" />
-              <span>New Chat</span>
-            </Link>
-          </div>
+          <Link
+            to="/chat"
+            className="w-full flex items-center justify-center px-3 py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
+          >
+            <MessageSquare size={20} className="mr-2" />
+            <span>Chat</span>
+          </Link>
           
           <button
             onClick={logout}
