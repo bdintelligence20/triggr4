@@ -1,7 +1,7 @@
 // hooks/useChat.tsx
 import { useRef, useEffect } from 'react';
 import { useAppContext } from '../contexts/AppContext';
-import { API_URL, QueryResponse } from '../types';
+import { API_URL, QueryResponse, ChatMessage } from '../types';
 
 export const useChat = () => {
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -40,19 +40,21 @@ export const useChat = () => {
     
     // Add the user message
     const userMessageId = Date.now();
-    const userMessage = {
+    const userMessage: ChatMessage = {
       id: userMessageId,
       content: newMessage,
       sender: 'user' as const,
       timestamp: new Date(),
       category: chatCategory
     };
-    setChatMessages(prev => [...prev, userMessage]);
+    // Create a new array with the user message added
+    const updatedMessages = [...chatMessages, userMessage];
+    setChatMessages(updatedMessages);
     setNewMessage('');
     
     // Add an initial AI acknowledgment
     const acknowledgeId = userMessageId + 1;
-    const acknowledgmentMessage = {
+    const acknowledgmentMessage: ChatMessage = {
       id: acknowledgeId,
       content: "⏳ I'm searching through our knowledge base...",
       sender: 'ai' as const,
@@ -60,7 +62,8 @@ export const useChat = () => {
       category: chatCategory,
       isStreaming: true
     };
-    setChatMessages(prev => [...prev, acknowledgmentMessage]);
+    // Create a new array with the acknowledgment message added
+    setChatMessages([...updatedMessages, acknowledgmentMessage]);
     
     try {
       // Determine category name for the API call
@@ -79,7 +82,6 @@ export const useChat = () => {
         },
         body: JSON.stringify({
           query: newMessage,
-          category: categoryName === 'All Items' ? '' : categoryName.toLowerCase(),
           stream: true,
           history: conversationHistory
         }),
@@ -95,24 +97,23 @@ export const useChat = () => {
       }
       
       // Replace the acknowledgment with the actual AI response
-      setChatMessages(prev =>
-        prev.map(msg =>
-          msg.id === acknowledgeId
-            ? {
-                ...msg,
-                content: result.response || "I couldn't find an answer to your question.",
-                sources: result.sources,
-                isStreaming: false
-              }
-            : msg
-        )
+      const updatedMessagesWithResponse = chatMessages.map((msg: ChatMessage) =>
+        msg.id === acknowledgeId
+          ? {
+              ...msg,
+              content: result.response || "I couldn't find an answer to your question.",
+              sources: result.sources,
+              isStreaming: false
+            }
+          : msg
       );
+      setChatMessages(updatedMessagesWithResponse);
       
       // Optionally add a completion message
       if (result.response) {
         setTimeout(() => {
           const completionMessageId = Date.now();
-          const completionMessage = {
+          const completionMessage: ChatMessage = {
             id: completionMessageId,
             content: "✅ That completes my answer. Let me know if you need any clarification!",
             sender: 'ai' as const,
@@ -120,23 +121,23 @@ export const useChat = () => {
             category: chatCategory,
             isStreaming: false
           };
-          setChatMessages(prev => [...prev, completionMessage]);
+          // Get the latest messages and add the completion message
+          setChatMessages([...updatedMessagesWithResponse, completionMessage]);
         }, 1000);
       }
       
     } catch (err) {
       console.error('Error getting AI response:', err);
-      setChatMessages(prev =>
-        prev.map(msg =>
-          msg.id === acknowledgeId
-            ? {
-                ...msg,
-                content: "Sorry, I encountered an error while processing your request. Please try again later.",
-                isStreaming: false
-              }
-            : msg
-        )
+      const errorMessages = chatMessages.map((msg: ChatMessage) =>
+        msg.id === acknowledgeId
+          ? {
+              ...msg,
+              content: "Sorry, I encountered an error while processing your request. Please try again later.",
+              isStreaming: false
+            }
+          : msg
       );
+      setChatMessages(errorMessages);
     }
   };
   

@@ -74,7 +74,6 @@ def query():
             # Non-streaming response
             result = rag_system.query(
                 user_query=query_text,
-                category=category,
                 history=conversation_history
             )
             
@@ -96,7 +95,6 @@ def query():
                 try:
                     result = rag_system.query(
                         user_query=query_text,
-                        category=category,
                         history=conversation_history,
                         stream_callback=stream_callback
                     )

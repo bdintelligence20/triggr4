@@ -103,8 +103,8 @@ class RAGSystem:
                 "sources": []
             }
             
-        # Optionally apply a category filter
-        filter_dict = {"category": category} if category else None
+        # Remove category filter to ensure all documents in the namespace are searched
+        filter_dict = None
         
         # Step 2: Query Pinecone with extra candidates
         extended_top_k = min(top_k + 3, 10)  # Get a few extra candidates
