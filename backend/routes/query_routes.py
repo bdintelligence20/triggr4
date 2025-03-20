@@ -4,7 +4,7 @@ import traceback
 from flask import Blueprint, request, jsonify
 from firebase_admin import firestore
 from langchain_rag import LangChainRAG
-from utils import get_user_organization_id
+from utils import get_user_organization_id, get_user_id
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -29,6 +29,12 @@ def query():
     category = data.get("category")
     stream_enabled = data.get("stream", False)
     conversation_history = data.get("history", "")
+    
+    # Log the auth header for debugging
+    auth_header = request.headers.get('Authorization')
+    logger.info(f"Auth header present: {bool(auth_header)}")
+    if auth_header:
+        logger.info(f"Auth header format valid: {auth_header.startswith('Bearer ')}")
     
     # Get organization ID from authenticated user
     organization_id = get_user_organization_id()
@@ -171,7 +177,17 @@ def save_chat_session():
     
     # Get organization ID and user ID from authenticated user
     organization_id = get_user_organization_id()
+    
+    # Log the auth header for debugging
+    auth_header = request.headers.get('Authorization')
+    logger.info(f"Auth header present: {bool(auth_header)}")
+    if auth_header:
+        logger.info(f"Auth header format valid: {auth_header.startswith('Bearer ')}")
+    
+    # Get user ID
     user_id = get_user_id()
+    
+    logger.info(f"Organization ID: {organization_id}, User ID: {user_id}")
     
     # Enforce organization ID requirement for multi-tenant isolation
     if not organization_id:

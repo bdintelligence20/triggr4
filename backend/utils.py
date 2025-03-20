@@ -36,6 +36,7 @@ def get_user_organization_id():
     auth_header = request.headers.get('Authorization')
     
     if not auth_header or not auth_header.startswith('Bearer '):
+        logger.error("Missing or invalid Authorization header")
         return None
     
     token = auth_header.split(' ')[1]
@@ -45,9 +46,11 @@ def get_user_organization_id():
         from auth_routes import verify_token
         payload = verify_token(token)
         if not payload:
+            logger.error("Token verification failed")
             return None
         
         user_id = payload.get('user_id')
+        logger.info(f"User ID from token: {user_id}")
         
         # Import here to avoid circular imports
         from firebase_admin import firestore
@@ -56,10 +59,17 @@ def get_user_organization_id():
         # Get user data from Firestore
         user_doc = db.collection('users').document(user_id).get()
         if not user_doc.exists:
+            logger.error(f"User document not found for user ID: {user_id}")
             return None
         
         user_data = user_doc.to_dict()
-        return user_data.get('organizationId')
+        org_id = user_data.get('organizationId')
+        logger.info(f"Retrieved organization ID: {org_id}")
+        
+        if not org_id:
+            logger.error(f"No organization ID found for user: {user_id}")
+        
+        return org_id
     except Exception as e:
         logger.error(f"Error getting user organization ID: {str(e)}")
         return None

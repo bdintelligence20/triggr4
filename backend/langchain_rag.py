@@ -116,15 +116,14 @@ class LangChainRAG:
             namespace = f"org_{self.organization_id}" if self.organization_id else "global_knowledge_base"
             
             # Create the official PineconeHybridSearchRetriever
+            index = pc.Index(self.index_name)
             base_retriever = PineconeHybridSearchRetriever(
                 embeddings=self.embedding_model,
-                pinecone_api_key=self.pinecone_api_key,
-                index_name=self.index_name,
+                index=index,
                 namespace=namespace,
                 top_k=10,  # Retrieve more candidates for reranking
                 alpha=0.5,  # Balance between sparse and dense retrieval (0.0 = all sparse, 1.0 = all dense)
-                filter=filter_dict,
-                text_field="text"  # The field containing the document text
+                filter=filter_dict
             )
             logger.info("Using official PineconeHybridSearchRetriever")
         except Exception as e:
@@ -132,8 +131,8 @@ class LangChainRAG:
             try:
                 logger.warning(f"Official PineconeHybridSearchRetriever not available, trying custom hybrid: {str(e)}")
                 # Use our custom hybrid search implementation
-                from langchain.retrievers.base import BaseRetriever
-                from langchain.callbacks.manager import CallbackManagerForRetrieverRun
+                from langchain_core.retrievers import BaseRetriever
+                from langchain_core.callbacks.manager import CallbackManagerForRetrieverRun
                 
                 # Create a custom retriever that inherits from BaseRetriever
                 class CustomHybridSearchRetriever(BaseRetriever):
