@@ -50,7 +50,9 @@ const ChatHistory: React.FC = () => {
               <div className="flex items-center">
                 <Clock size={12} className="mr-1" />
                 <span>
-                  {session.created_at && format(new Date(session.created_at.seconds * 1000), 'MMM d, yyyy h:mm a')}
+                  {session.created_at && session.created_at.seconds ? 
+                    format(new Date(session.created_at.seconds * 1000), 'MMM d, yyyy h:mm a') : 
+                    'Recent'}
                 </span>
               </div>
             </div>

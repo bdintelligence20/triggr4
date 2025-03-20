@@ -255,14 +255,28 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }));
       
       // Update AppContext with session messages
-      setChatMessages(sessionMessages.map((msg: any) => ({
-        id: msg.id,
-        content: msg.content,
-        sender: msg.type === 'employee' ? 'user' : 'ai',
-        timestamp: new Date(msg.timestamp),
-        category: session.category,
-        sources: msg.sources
-      })));
+      setChatMessages(sessionMessages.map((msg: any) => {
+        // Safely create a Date object from the timestamp
+        let timestamp;
+        try {
+          timestamp = msg.timestamp ? new Date(msg.timestamp) : new Date();
+          // Validate the date is valid
+          if (isNaN(timestamp.getTime())) {
+            timestamp = new Date(); // Fallback to current date if invalid
+          }
+        } catch (e) {
+          timestamp = new Date(); // Fallback to current date if error
+        }
+        
+        return {
+          id: msg.id,
+          content: msg.content,
+          sender: msg.type === 'employee' ? 'user' : 'ai',
+          timestamp: timestamp,
+          category: session.category,
+          sources: msg.sources
+        };
+      }));
       
       setChatCategory(session.category);
       
