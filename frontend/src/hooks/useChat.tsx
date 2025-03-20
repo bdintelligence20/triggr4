@@ -47,9 +47,8 @@ export const useChat = () => {
       timestamp: new Date(),
       category: chatCategory
     };
-    // Create a new array with the user message added
-    const updatedMessages = [...chatMessages, userMessage];
-    setChatMessages(updatedMessages);
+    
+    setChatMessages((prevMessages: ChatMessage[]) => [...prevMessages, userMessage]);
     setNewMessage('');
     
     // Add an initial AI acknowledgment
@@ -62,8 +61,8 @@ export const useChat = () => {
       category: chatCategory,
       isStreaming: true
     };
-    // Create a new array with the acknowledgment message added
-    setChatMessages([...updatedMessages, acknowledgmentMessage]);
+    
+    setChatMessages((prevMessages: ChatMessage[]) => [...prevMessages, acknowledgmentMessage]);
     
     try {
       // Determine category name for the API call
@@ -97,17 +96,18 @@ export const useChat = () => {
       }
       
       // Replace the acknowledgment with the actual AI response
-      const updatedMessagesWithResponse = chatMessages.map((msg: ChatMessage) =>
-        msg.id === acknowledgeId
-          ? {
-              ...msg,
-              content: result.response || "I couldn't find an answer to your question.",
-              sources: result.sources,
-              isStreaming: false
-            }
-          : msg
+      setChatMessages((prevMessages: ChatMessage[]) => 
+        prevMessages.map((msg: ChatMessage) =>
+          msg.id === acknowledgeId
+            ? {
+                ...msg,
+                content: result.response || "I couldn't find an answer to your question.",
+                sources: result.sources,
+                isStreaming: false
+              }
+            : msg
+        )
       );
-      setChatMessages(updatedMessagesWithResponse);
       
       // Optionally add a completion message
       if (result.response) {
@@ -121,23 +121,24 @@ export const useChat = () => {
             category: chatCategory,
             isStreaming: false
           };
-          // Get the latest messages and add the completion message
-          setChatMessages([...updatedMessagesWithResponse, completionMessage]);
+          // Add the completion message
+          setChatMessages((prevMessages: ChatMessage[]) => [...prevMessages, completionMessage]);
         }, 1000);
       }
       
     } catch (err) {
       console.error('Error getting AI response:', err);
-      const errorMessages = chatMessages.map((msg: ChatMessage) =>
-        msg.id === acknowledgeId
-          ? {
-              ...msg,
-              content: "Sorry, I encountered an error while processing your request. Please try again later.",
-              isStreaming: false
-            }
-          : msg
+      setChatMessages((prevMessages: ChatMessage[]) =>
+        prevMessages.map((msg: ChatMessage) =>
+          msg.id === acknowledgeId
+            ? {
+                ...msg,
+                content: "Sorry, I encountered an error while processing your request. Please try again later.",
+                isStreaming: false
+              }
+            : msg
+        )
       );
-      setChatMessages(errorMessages);
     }
   };
   

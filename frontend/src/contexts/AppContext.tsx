@@ -41,7 +41,7 @@ interface AppContextType {
   newMessage: string;
   setNewMessage: (value: string) => void;
   chatMessages: ChatMessage[];
-  setChatMessages: (value: ChatMessage[]) => void;
+  setChatMessages: (value: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
   activeEventSource: EventSource | null;
   setActiveEventSource: (value: EventSource | null) => void;
   
