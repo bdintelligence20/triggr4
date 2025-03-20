@@ -41,25 +41,7 @@ const Sidebar: React.FC = () => {
     >
       <div className="flex-grow overflow-y-auto py-4 flex flex-col h-full">
         <nav className="px-4 space-y-1 flex-grow">
-          {/* Original Views */}
-          <div className="mb-4">
-            <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-              Current Views
-            </div>
-            <Link
-              to="/dashboard/library"
-              className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
-                isActive('/dashboard/library') 
-                  ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
-                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
-              }`}
-            >
-              <Book size={20} className="mr-3" />
-              <span>Library</span>
-            </Link>
-          </div>
-          
-          {/* New Views */}
+          {/* Main Navigation */}
           <div className="mb-4">
             <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
               Main Navigation
@@ -101,58 +83,6 @@ const Sidebar: React.FC = () => {
             </Link>
           </div>
           
-          <div className="pt-2">
-            <button
-              onClick={() => setCategoriesOpen(!categoriesOpen)}
-              className="w-full flex items-center justify-between px-3 py-2 rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-            >
-              <div className="flex items-center">
-                <FileText size={20} className="mr-3" />
-                <span>Hubs</span>
-              </div>
-              {categoriesOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            </button>
-            
-            {categoriesOpen && (
-              <div className="ml-6 mt-1 space-y-1">
-                {categories.map(category => (
-                  <button
-                    key={category.id}
-                    onClick={() => {
-                      setSelectedCategory(category.id);
-                    }}
-                    className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
-                      selectedCategory === category.id && isActive('/library')
-                        ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
-                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
-                    }`}
-                  >
-                    <span>{category.name}</span>
-                  </button>
-                ))}
-                
-                <button
-                  className="w-full flex items-center px-3 py-2 rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                  onClick={handleAddCategory}
-                >
-                  <Plus size={16} className="mr-2" />
-                  <span>Add Category</span>
-                </button>
-              </div>
-            )}
-          </div>
-          
-          <Link
-            to="/dashboard/integration"
-            className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
-              isActive('/integration') 
-                ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
-                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
-            }`}
-          >
-            <Plug size={20} className="mr-3" />
-            <span>Integration</span>
-          </Link>
         </nav>
         
         {/* Bottom buttons */}
