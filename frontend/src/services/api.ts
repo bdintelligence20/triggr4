@@ -220,3 +220,66 @@ export async function saveChatSession(data: {
     body: JSON.stringify(data),
   });
 }
+
+// Member Management API functions
+
+// Get all members for the current user's organization
+export async function getMembers(): Promise<ApiResponse<{members: any[]}>> {
+  return fetchApi<{members: any[]}>('/members', {
+    method: 'GET',
+  });
+}
+
+// Add a new member to the organization
+export async function addMember(data: {
+  name?: string;
+  email: string;
+  phone: string;
+  position?: string;
+  role?: string;
+}): Promise<ApiResponse<{memberId: string, member: any}>> {
+  return fetchApi<{memberId: string, member: any}>('/members', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+}
+
+// Update a member's details
+export async function updateMember(
+  memberId: string,
+  data: {
+    name?: string;
+    position?: string;
+    role?: string;
+    status?: string;
+  }
+): Promise<ApiResponse<{memberId: string}>> {
+  return fetchApi<{memberId: string}>(`/members/${memberId}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+}
+
+// Delete a member
+export async function deleteMember(memberId: string): Promise<ApiResponse<{memberId: string}>> {
+  return fetchApi<{memberId: string}>(`/members/${memberId}`, {
+    method: 'DELETE',
+  });
+}
+
+// Send WhatsApp verification to a member
+export async function sendWhatsAppVerification(memberId: string): Promise<ApiResponse<{memberId: string}>> {
+  return fetchApi<{memberId: string}>('/members/send-verification', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ memberId }),
+  });
+}

@@ -101,12 +101,14 @@ def create_app():
     from routes.query_routes import query_bp
     from routes.whatsapp_routes import whatsapp_bp
     from routes.utility_routes import utility_bp
+    from routes.member_routes import member_bp
 
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(document_bp)
     app.register_blueprint(query_bp)
     app.register_blueprint(whatsapp_bp)
     app.register_blueprint(utility_bp)
+    app.register_blueprint(member_bp)
 
     return app
 
