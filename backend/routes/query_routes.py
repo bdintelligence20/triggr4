@@ -4,7 +4,7 @@ import traceback
 from flask import Blueprint, request, jsonify
 from firebase_admin import firestore
 from rag_system import RAGSystem
-from utils import get_user_organization_id, get_user_id
+import utils
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def query():
         logger.info(f"Auth header format valid: {auth_header.startswith('Bearer ')}")
     
     # Get organization ID from authenticated user
-    organization_id = get_user_organization_id()
+    organization_id = utils.get_user_organization_id()
     
     # Enforce organization ID requirement for multi-tenant isolation
     if not organization_id:
@@ -126,8 +126,8 @@ def query():
 def get_chat_history():
     """Get chat history for the current user."""
     # Get organization ID and user ID from authenticated user
-    organization_id = get_user_organization_id()
-    user_id = get_user_id()
+    organization_id = utils.get_user_organization_id()
+    user_id = utils.get_user_id()
     
     # Enforce organization ID requirement for multi-tenant isolation
     if not organization_id:
@@ -176,7 +176,7 @@ def save_chat_session():
     category = data.get("category", "general")
     
     # Get organization ID and user ID from authenticated user
-    organization_id = get_user_organization_id()
+    organization_id = utils.get_user_organization_id()
     
     # Log the auth header for debugging
     auth_header = request.headers.get('Authorization')
@@ -185,7 +185,7 @@ def save_chat_session():
         logger.info(f"Auth header format valid: {auth_header.startswith('Bearer ')}")
     
     # Get user ID
-    user_id = get_user_id()
+    user_id = utils.get_user_id()
     
     logger.info(f"Organization ID: {organization_id}, User ID: {user_id}")
     
@@ -241,8 +241,8 @@ def save_chat_session():
 def get_chat_session(session_id):
     """Get a specific chat session."""
     # Get organization ID and user ID from authenticated user
-    organization_id = get_user_organization_id()
-    user_id = get_user_id()
+    organization_id = utils.get_user_organization_id()
+    user_id = utils.get_user_id()
     
     # Enforce organization ID requirement for multi-tenant isolation
     if not organization_id:
@@ -291,7 +291,7 @@ def evaluate_rag():
         test_cases = data.get("test_cases", [])
         
         # Get organization ID from authenticated user
-        organization_id = get_user_organization_id()
+        organization_id = utils.get_user_organization_id()
         
         # Enforce organization ID requirement for multi-tenant isolation
         if not organization_id:
