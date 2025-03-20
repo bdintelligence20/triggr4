@@ -13,6 +13,8 @@ async function fetchApi<T>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
+    console.log(`Making API request to: ${API_BASE_URL}${endpoint}`);
+    
     // Add auth token if available
     const token = localStorage.getItem('auth_token');
     const headers = {
@@ -20,10 +22,19 @@ async function fetchApi<T>(
       ...(token && { 'Authorization': `Bearer ${token}` })
     };
     
+    // Log request details for debugging
+    console.log('Request options:', {
+      method: options.method || 'GET',
+      headers,
+      body: options.body ? (typeof options.body === 'string' ? options.body : 'FormData or other body type') : undefined
+    });
+    
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
       headers
     });
+    
+    console.log(`Response status: ${response.status}`);
     
     // Handle 401 Unauthorized by redirecting to login
     if (response.status === 401) {
@@ -36,7 +47,26 @@ async function fetchApi<T>(
       };
     }
     
-    const data = await response.json();
+    // Handle 404 Not Found specifically for our endpoints
+    if (response.status === 404) {
+      console.error(`Endpoint not found: ${endpoint}`);
+      return {
+        error: `The requested endpoint (${endpoint}) was not found on the server. This may indicate that the backend service needs to be updated.`,
+        status: 404
+      };
+    }
+    
+    let data;
+    try {
+      data = await response.json();
+      console.log('Response data:', data);
+    } catch (jsonError) {
+      console.error('Error parsing JSON response:', jsonError);
+      return {
+        error: 'Invalid response format from server',
+        status: response.status
+      };
+    }
     
     return {
       data: response.ok ? data : undefined,
@@ -45,8 +75,19 @@ async function fetchApi<T>(
     };
   } catch (error) {
     console.error('API call failed:', error);
+    
+    // Provide more detailed error message for network errors
+    let errorMessage = 'Network error';
+    if (error instanceof Error) {
+      if (error.message.includes('Failed to fetch') || error.message.includes('Network request failed')) {
+        errorMessage = `Cannot connect to server at ${API_BASE_URL}. Please check your internet connection or contact support.`;
+      } else {
+        errorMessage = error.message;
+      }
+    }
+    
     return {
-      error: error instanceof Error ? error.message : 'Network error',
+      error: errorMessage,
       status: 0
     };
   }

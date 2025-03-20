@@ -71,33 +71,61 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
 
   if (!isOpen) return null;
 
+  // Helper function to validate phone number format
+  const isValidPhoneNumber = (phone: string): boolean => {
+    // Check if the phone number starts with + and has at least 8 digits
+    const phoneRegex = /^\+\d{1,3}\d{6,14}$/;
+    return phoneRegex.test(phone);
+  };
+
   const handleAddMember = async () => {
+    console.log('Add Member button clicked');
+    
     if (!user?.organizationId) {
       showNotification('Organization ID is required to add members', 'error');
+      console.log('No organization ID found');
       return;
     }
     
     if (!emailInput) {
       showNotification('Email is required', 'error');
+      console.log('Email is required');
       return;
     }
     
     if (!phoneInput) {
       showNotification('Phone number is required', 'error');
+      console.log('Phone number is required');
+      return;
+    }
+    
+    // Validate phone number format
+    if (!isValidPhoneNumber(phoneInput)) {
+      showNotification('Phone number must be in international format with + prefix (e.g., +27123456789)', 'error');
+      console.log('Invalid phone number format');
       return;
     }
     
     if (members.find(m => m.email === emailInput)) {
       showNotification('A member with this email already exists', 'error');
+      console.log('Email already exists');
       return;
     }
     
     if (members.find(m => m.phone === phoneInput)) {
       showNotification('A member with this phone number already exists', 'error');
+      console.log('Phone number already exists');
       return;
     }
     
     setIsLoading(true);
+    console.log('Sending API request with data:', {
+      name: nameInput,
+      email: emailInput,
+      phone: phoneInput,
+      position: positionInput,
+      role: 'viewer'
+    });
     
     try {
       // Call the API to add a member
@@ -108,6 +136,8 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
         position: positionInput,
         role: 'viewer'
       });
+      
+      console.log('API response:', response);
       
       if (response.error) {
         throw new Error(response.error);
@@ -124,6 +154,9 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
         setPositionInput('');
         
         showNotification('Member added successfully', 'success');
+        console.log('Member added successfully');
+      } else {
+        console.log('No member data in response');
       }
     } catch (err) {
       showNotification(err instanceof Error ? err.message : 'Failed to add member', 'error');
@@ -266,6 +299,7 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
                   required
                 />
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                <p className="text-xs text-gray-500 mt-1">Format: +[country code][number] (e.g., +27123456789)</p>
               </div>
               <div className="relative">
                 <input
@@ -279,7 +313,12 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
               </div>
             </div>
             <button
-              onClick={handleAddMember}
+              onClick={(e) => {
+                e.preventDefault();
+                console.log('Add Member button clicked - event handler');
+                alert('Add Member button clicked - This alert confirms the button is working');
+                handleAddMember();
+              }}
               className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600"
             >
               <Plus size={20} />
