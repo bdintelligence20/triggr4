@@ -1,6 +1,6 @@
 // components/chat/ChatWindow.tsx
 import React from 'react';
-import { Book, MessageSquare } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import { useChat } from '../../hooks/useChat';
@@ -16,10 +16,10 @@ const ChatWindow: React.FC = () => {
   const { chatContainerRef } = useChat();
 
   return (
-    <div className="md:col-span-3 flex flex-col">
+    <div className="md:col-span-3 flex flex-col h-full overflow-hidden">
       <div 
         ref={chatContainerRef}
-        className="flex-grow bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 mb-4 h-96 overflow-y-auto"
+        className="flex-grow bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 mb-4 overflow-y-auto"
       >
         {filteredChatMessages.length > 0 ? (
           <div className="space-y-4">

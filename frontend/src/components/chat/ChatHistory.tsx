@@ -14,10 +14,10 @@ const ChatHistory: React.FC = () => {
   }
   
   return (
-    <div>
+    <div className="h-full flex flex-col overflow-hidden">
       <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Your Chat History</h3>
       
-      <div className="space-y-3">
+      <div className="space-y-3 overflow-y-auto flex-grow">
         {chatHistory.map(session => (
           <button
             key={session.id}
