@@ -5,8 +5,8 @@ from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from firebase_admin import firestore
 from document_loaders import DocumentLoaderFactory
-from langchain_rag import LangChainRAG
-from vector_store import EnhancedPineconeStore
+from rag_system import RAGSystem
+from pinecone_client import PineconeClient
 from utils import allowed_file, get_user_organization_id
 
 # Configure logging
@@ -35,7 +35,7 @@ from app import gcs_client, bucket
 
 @document_bp.route('/upload', methods=['POST'])
 def upload_document():
-    """Upload and process a document for the knowledge base using LangChain."""
+    """Upload and process a document for the knowledge base using custom RAG system."""
     logger.info("Upload endpoint called")
     
     # Get organization ID from authenticated user
@@ -112,10 +112,10 @@ def upload_document():
         doc_ref.set(doc_data)
         logger.info(f"Created document record with ID: {item_id}")
         
-        # Process with LangChain
+        # Process with custom RAG system
         try:
-            # Initialize organization-specific LangChain RAG system
-            org_langchain_rag = LangChainRAG(
+            # Initialize organization-specific RAG system
+            rag_system = RAGSystem(
                 openai_api_key=OPENAI_API_KEY,
                 anthropic_api_key=ANTHROPIC_API_KEY,
                 pinecone_api_key=PINECONE_API_KEY,
@@ -124,10 +124,10 @@ def upload_document():
             )
             
             # Process document
-            vectors_stored = org_langchain_rag.process_document(
-                file_path=local_path,
+            vectors_stored = rag_system.process_document(
+                doc_text=open(local_path, 'r', encoding='utf-8', errors='replace').read(),
                 source_id=item_id,
-                category=category
+                namespace=None  # Will use organization-based namespace
             )
             
             # Extract text and metadata for storage
@@ -223,7 +223,7 @@ def list_documents():
 
 @document_bp.route('/delete/<item_id>', methods=['DELETE'])
 def delete_document(item_id):
-    """Delete a document and its vectors from the knowledge base using LangChain."""
+    """Delete a document and its vectors from the knowledge base using custom RAG system."""
     try:
         # Get the document
         doc_ref = db.collection("knowledge_items").document(item_id)
@@ -253,8 +253,8 @@ def delete_document(item_id):
         # Use the document's organization ID
         organization_id = doc_org_id
         
-        # Initialize vector store
-        vector_store = EnhancedPineconeStore(
+        # Initialize Pinecone client
+        pinecone_client = PineconeClient(
             api_key=PINECONE_API_KEY,
             index_name=PINECONE_INDEX_NAME,
             organization_id=organization_id
@@ -268,7 +268,7 @@ def delete_document(item_id):
             vector_ids.append(f"{item_id}_{i}")
         
         # Delete vectors
-        vectors_deleted = vector_store.delete_documents(vector_ids)
+        vectors_deleted = pinecone_client.delete_vectors(vector_ids)
         
         # Delete from GCS if URL exists
         if 'file_url' in doc_data:

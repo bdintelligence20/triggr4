@@ -5,7 +5,7 @@ from flask import Blueprint, request, jsonify
 from firebase_admin import firestore
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
-from langchain_rag import LangChainRAG
+from rag_system import RAGSystem
 from utils import split_message_semantically
 
 # Configure logging
@@ -80,7 +80,7 @@ def send_whatsapp_message(to_number, message_body):
 
 @whatsapp_bp.route('/whatsapp-webhook', methods=['POST'])
 def whatsapp_webhook():
-    """Handle incoming WhatsApp messages with LangChain RAG."""
+    """Handle incoming WhatsApp messages with custom RAG system."""
     try:
         # Get the incoming message
         incoming_msg = request.values.get('Body', '').strip()
@@ -107,8 +107,8 @@ def whatsapp_webhook():
         send_whatsapp_message(from_number, "⏳ I'm searching through our knowledge base...")
         
         try:
-            # Initialize LangChain RAG system
-            whatsapp_langchain_rag = LangChainRAG(
+            # Initialize custom RAG system
+            whatsapp_rag = RAGSystem(
                 openai_api_key=OPENAI_API_KEY,
                 anthropic_api_key=ANTHROPIC_API_KEY,
                 pinecone_api_key=PINECONE_API_KEY,
@@ -122,8 +122,8 @@ def whatsapp_webhook():
                 accumulated_text.append(chunk)
             
             # Query the RAG system
-            result = whatsapp_langchain_rag.query(
-                query_text=incoming_msg,
+            result = whatsapp_rag.query(
+                user_query=incoming_msg,
                 stream_callback=stream_callback
             )
             

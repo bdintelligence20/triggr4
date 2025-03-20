@@ -3,7 +3,7 @@ import logging
 import traceback
 from flask import Blueprint, request, jsonify
 from firebase_admin import firestore
-from langchain_rag import LangChainRAG
+from rag_system import RAGSystem
 from utils import get_user_organization_id, get_user_id
 
 # Configure logging
@@ -23,7 +23,7 @@ PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "knowledge-hub-vecto
 
 @query_bp.route('/query', methods=['POST'])
 def query():
-    """Query the knowledge base using LangChain RAG."""
+    """Query the knowledge base using custom RAG system."""
     data = request.get_json()
     query_text = data.get("query")
     category = data.get("category")
@@ -61,8 +61,8 @@ def query():
             "organizationId": organization_id
         })
         
-        # Initialize organization-specific LangChain RAG system
-        org_langchain_rag = LangChainRAG(
+        # Initialize organization-specific RAG system
+        rag_system = RAGSystem(
             openai_api_key=OPENAI_API_KEY,
             anthropic_api_key=ANTHROPIC_API_KEY,
             pinecone_api_key=PINECONE_API_KEY,
@@ -72,8 +72,8 @@ def query():
         
         if not stream_enabled:
             # Non-streaming response
-            result = org_langchain_rag.query(
-                query_text=query_text,
+            result = rag_system.query(
+                user_query=query_text,
                 category=category,
                 history=conversation_history
             )
@@ -94,8 +94,8 @@ def query():
                     accumulated_response += chunk
                 
                 try:
-                    result = org_langchain_rag.query(
-                        query_text=query_text,
+                    result = rag_system.query(
+                        user_query=query_text,
                         category=category,
                         history=conversation_history,
                         stream_callback=stream_callback

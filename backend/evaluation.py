@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, Any, List, Optional
 from langchain.evaluation import load_evaluator
-from langchain_rag import LangChainRAG
+from rag_system import RAGSystem
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class RAGEvaluator:
         self.organization_id = organization_id
         
         # Initialize RAG system
-        self.rag_system = LangChainRAG(
+        self.rag_system = RAGSystem(
             openai_api_key=self.openai_api_key,
             anthropic_api_key=self.anthropic_api_key,
             pinecone_api_key=self.pinecone_api_key,
@@ -41,7 +41,7 @@ class RAGEvaluator:
         try:
             # Query the RAG system
             result = self.rag_system.query(
-                query_text=query,
+                user_query=query,
                 category=category
             )
             
