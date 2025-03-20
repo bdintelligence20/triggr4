@@ -87,7 +87,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [processingProgress, setProcessingProgress] = useState(0);
   
   // Chat States
-  const [chatCategory, setChatCategory] = useState('');
+  const [chatCategory, setChatCategory] = useState('default');
   const [newMessage, setNewMessage] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [activeEventSource, setActiveEventSource] = useState<EventSource | null>(null);

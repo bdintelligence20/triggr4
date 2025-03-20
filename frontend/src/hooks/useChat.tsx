@@ -30,7 +30,7 @@ export const useChat = () => {
   };
   
   const handleSendMessage = async () => {
-    if (!newMessage.trim() || !chatCategory) return;
+    if (!newMessage.trim()) return;
     
     // Close any existing EventSource
     if (activeEventSource) {

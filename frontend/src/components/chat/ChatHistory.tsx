@@ -1,6 +1,5 @@
 import React from 'react';
 import { useChat } from '../../contexts/ChatContext';
-import { format } from 'date-fns';
 import { MessageCircle, Clock } from 'lucide-react';
 
 const ChatHistory: React.FC = () => {
@@ -15,8 +14,8 @@ const ChatHistory: React.FC = () => {
   }
   
   return (
-    <div className="mt-8">
-      <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Chat History</h3>
+    <div>
+      <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Your Chat History</h3>
       
       <div className="space-y-3">
         {chatHistory.map(session => (
@@ -51,7 +50,7 @@ const ChatHistory: React.FC = () => {
                 <Clock size={12} className="mr-1" />
                 <span>
                   {session.created_at && session.created_at.seconds ? 
-                    format(new Date(session.created_at.seconds * 1000), 'MMM d, yyyy h:mm a') : 
+                    new Date(session.created_at.seconds * 1000).toLocaleString() : 
                     'Recent'}
                 </span>
               </div>
