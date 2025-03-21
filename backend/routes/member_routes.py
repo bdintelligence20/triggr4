@@ -74,22 +74,36 @@ def add_member():
     try:
         # Get the user ID from the request
         auth_header = request.headers.get('Authorization')
+        logger.info(f"Auth header: {auth_header}")
+        
         if not auth_header or not auth_header.startswith('Bearer '):
+            logger.error("Missing or invalid Authorization header")
             return jsonify({'error': 'Unauthorized'}), 401
         
         token = auth_header.split(' ')[1]
+        logger.info(f"Token: {token[:10]}...")  # Log first 10 chars of token for debugging
         
         # Get the user from Firestore
         users_ref = db.collection('users')
+        logger.info("Querying users collection for auth_token")
         user_query = users_ref.where('auth_token', '==', token).limit(1).get()
         
-        if not user_query:
+        # Check if user_query is empty
+        user_query_list = list(user_query)
+        logger.info(f"User query results: {len(user_query_list)} documents found")
+        
+        if not user_query_list:
+            logger.error(f"No user found with token: {token[:10]}...")
             return jsonify({'error': 'User not found'}), 404
         
-        user_data = user_query[0].to_dict()
+        user_data = user_query_list[0].to_dict()
+        logger.info(f"User data: {user_data}")
+        
         organization_id = user_data.get('organizationId')
+        logger.info(f"Organization ID: {organization_id}")
         
         if not organization_id:
+            logger.error(f"User does not have an organizationId: {user_data}")
             return jsonify({'error': 'User does not belong to an organization'}), 400
         
         # Get the member data from the request

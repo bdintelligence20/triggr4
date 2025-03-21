@@ -66,6 +66,13 @@ def register():
             display_name=full_name or email.split('@')[0].title()
         )
         
+        # Generate JWT token
+        token = generate_token(
+            user.uid,
+            email,
+            'user'
+        )
+        
         # Create user document in Firestore
         user_data = {
             'email': email,
@@ -74,17 +81,13 @@ def register():
             'createdAt': firestore.SERVER_TIMESTAMP,
             'organizationId': None,  # Will be set during onboarding
             'organizationName': None,
-            'organizationRole': 'admin'  # First user is admin by default
+            'organizationRole': 'admin',  # First user is admin by default
+            'auth_token': token  # Store the token in the user document
         }
         
         db.collection('users').document(user.uid).set(user_data)
         
-        # Generate JWT token
-        token = generate_token(
-            user.uid,
-            email,
-            'user'
-        )
+        logger.info(f"User {user.uid} registered successfully")
         
         return jsonify({
             'message': 'User registered successfully',
@@ -157,6 +160,14 @@ def login():
             user_data.get('role', 'user')
         )
         
+        # Store the token in the user document
+        db.collection('users').document(user.uid).update({
+            'auth_token': token,
+            'last_login': firestore.SERVER_TIMESTAMP
+        })
+        
+        logger.info(f"User {user.uid} logged in successfully")
+        
         return jsonify({
             'token': token,
             'user': {
@@ -214,11 +225,19 @@ def validate_token():
                 'createdAt': firestore.SERVER_TIMESTAMP,
                 'organizationId': None,
                 'organizationName': None,
-                'organizationRole': 'admin'
+                'organizationRole': 'admin',
+                'auth_token': token  # Store the token in the user document
             }
             db.collection('users').document(user_id).set(user_data)
         else:
             user_data = user_doc.to_dict()
+            # Update the auth token in the user document
+            db.collection('users').document(user_id).update({
+                'auth_token': token,
+                'last_token_validation': firestore.SERVER_TIMESTAMP
+            })
+            
+        logger.info(f"Token validated for user {user_id}")
         
         return jsonify({
             'id': user_id,

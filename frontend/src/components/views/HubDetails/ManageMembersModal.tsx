@@ -37,10 +37,43 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen && user?.organizationId) {
-      fetchMembers();
+    // Log user information for debugging
+    console.log('User object:', user);
+    console.log('User organizationId:', user?.organizationId);
+    
+    // Check if auth token is present in localStorage
+    const token = localStorage.getItem('auth_token');
+    console.log('Auth token in localStorage:', token ? 'Present' : 'Not present');
+    
+    if (isOpen) {
+      if (user?.organizationId) {
+        // Check API health first
+        checkApiHealth();
+        fetchMembers();
+      } else {
+        console.error('User does not have an organizationId:', user);
+        setError('User does not belong to an organization. Please contact support.');
+      }
     }
   }, [isOpen, user?.organizationId]);
+
+  const checkApiHealth = async () => {
+    try {
+      console.log('Checking API health...');
+      const response = await api.checkHealth();
+      console.log('API health check response:', response);
+      
+      if (response.error) {
+        console.error('API health check failed:', response.error);
+        setError(`API connection issue: ${response.error}`);
+      } else {
+        console.log('API health check successful:', response.data);
+      }
+    } catch (err) {
+      console.error('Error checking API health:', err);
+      setError('Failed to connect to the API. Please try again later.');
+    }
+  };
 
   const fetchMembers = async () => {
     if (!user?.organizationId) return;
@@ -128,6 +161,14 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
     });
     
     try {
+      console.log('About to call API with data:', {
+        name: nameInput,
+        email: emailInput,
+        phone: phoneInput,
+        position: positionInput,
+        role: 'viewer'
+      });
+      
       // Call the API to add a member
       const response = await api.addMember({
         name: nameInput,
@@ -138,8 +179,11 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
       });
       
       console.log('API response:', response);
+      console.log('API response data:', response.data);
+      console.log('API response status:', response.status);
       
       if (response.error) {
+        console.error('API error:', response.error);
         throw new Error(response.error);
       }
       
@@ -320,11 +364,86 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
               </div>
             </div>
             <button
-              onClick={(e) => {
+              onClick={async (e) => {
                 e.preventDefault();
                 console.log('Add Member button clicked - event handler');
                 alert('Add Member button clicked - This alert confirms the button is working');
-                handleAddMember();
+                
+                // Check if user has organizationId
+                if (!user?.organizationId) {
+                  console.error('No organization ID found in user object:', user);
+                  showNotification('Organization ID is required to add members', 'error');
+                  return;
+                }
+                
+                // Check required fields
+                if (!emailInput) {
+                  console.error('Email is required');
+                  showNotification('Email is required', 'error');
+                  return;
+                }
+                
+                if (!phoneInput) {
+                  console.error('Phone number is required');
+                  showNotification('Phone number is required', 'error');
+                  return;
+                }
+                
+                // Directly make the API call here to bypass any potential issues in handleAddMember
+                try {
+                  console.log('Making direct API call with data:', {
+                    name: nameInput,
+                    email: emailInput,
+                    phone: phoneInput,
+                    position: positionInput,
+                    role: 'viewer'
+                  });
+                  
+                  setIsLoading(true);
+                  
+                  // Call the API directly
+                  const response = await api.addMember({
+                    name: nameInput,
+                    email: emailInput,
+                    phone: phoneInput,
+                    position: positionInput,
+                    role: 'viewer'
+                  });
+                  
+                  console.log('Direct API call response:', response);
+                  
+                  if (response.error) {
+                    console.error('API error:', response.error);
+                    showNotification(response.error, 'error');
+                  } else if (response.data) {
+                    console.log('API success, data:', response.data);
+                    
+                    if (response.data.member) {
+                      // Add the new member to the local state
+                      setMembers([...members, response.data.member]);
+                      
+                      // Reset form inputs
+                      setNameInput('');
+                      setEmailInput('');
+                      setPhoneInput('');
+                      setPositionInput('');
+                      
+                      showNotification('Member added successfully', 'success');
+                      
+                      // Refresh the members list
+                      fetchMembers();
+                    } else {
+                      console.warn('No member data in response:', response.data);
+                      // Refresh the members list anyway
+                      fetchMembers();
+                    }
+                  }
+                } catch (err) {
+                  console.error('Error in direct API call:', err);
+                  showNotification(err instanceof Error ? err.message : 'Failed to add member', 'error');
+                } finally {
+                  setIsLoading(false);
+                }
               }}
               className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600"
             >
