@@ -134,13 +134,34 @@ class RAGSystem:
             context_chunks.append(f"Document {i+1}:\n{doc['text']}")
         context_text = "\n\n---\n\n".join(context_chunks)
         
-        # Prepare source information for citation
+        # Prepare source information for citation with document metadata
         sources = []
         for i, doc in enumerate(matched_docs[:top_k]):
-            sources.append({
-                "id": doc.get('source_id', 'unknown'),
-                "relevance_score": doc.get('score', 0)
-            })
+            source_id = doc.get('source_id', 'unknown')
+            
+            # Get document metadata from Firestore
+            try:
+                from firebase_admin import firestore
+                db = firestore.client()
+                doc_ref = db.collection("knowledge_items").document(source_id)
+                doc_data = doc_ref.get().to_dict() if doc_ref.get().exists else {}
+                
+                sources.append({
+                    "id": source_id,
+                    "relevance_score": doc.get('score', 0),
+                    "document": {
+                        "title": doc_data.get('title', 'Unknown Document'),
+                        "file_type": doc_data.get('file_type', 'unknown'),
+                        "file_url": doc_data.get('file_url', None)
+                    }
+                })
+            except Exception as e:
+                logger.warning(f"Error fetching document metadata for {source_id}: {str(e)}")
+                # Fallback to basic source info if metadata fetch fails
+                sources.append({
+                    "id": source_id,
+                    "relevance_score": doc.get('score', 0)
+                })
         
         try:
             if stream_callback is None:

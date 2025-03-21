@@ -21,6 +21,16 @@ export interface KnowledgeItem {
     whatsappNumber?: string;
   }
   
+  export interface Source {
+    id: string;
+    relevance_score: number;
+    document?: {
+      title: string;
+      file_type: string;
+      file_url: string | null;
+    }
+  }
+  
   export interface ChatMessage {
     id: string | number;
     content: string;
@@ -28,7 +38,7 @@ export interface KnowledgeItem {
     timestamp: Date;
     category?: string;
     isStreaming?: boolean; // Property to track streaming status
-    sources?: Array<{id: string, relevance_score: number}>; // Property for sources
+    sources?: Array<Source>; // Property for sources with enhanced metadata
   }
   
   // API responses
@@ -40,7 +50,7 @@ export interface KnowledgeItem {
   
   export interface QueryResponse {
     response?: string;
-    sources?: Array<{id: string, relevance_score: number}>;
+    sources?: Array<Source>;
     error?: string;
   }
   
