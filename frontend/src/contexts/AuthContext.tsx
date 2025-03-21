@@ -56,8 +56,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 email: userData.email || 'user@example.com',
                 fullName: userData.fullName || 'Test User',
                 photoUrl: userData.photoUrl,
-                role: userData.role || role || 'user'
+                role: userData.role || role || 'user',
+                organizationId: userData.organizationId,
+                organizationName: userData.organizationName,
+                organizationRole: userData.organizationRole
               });
+              
+              console.log('User data from token validation:', userData);
               setRole(userData.role || role || 'user');
             } else {
               // Token is invalid, clear it
@@ -72,8 +77,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 id: '1',
                 email: localStorage.getItem('auth_email') || 'user@example.com',
                 fullName: 'Test User',
-                role: role || 'user'
+                role: role || 'user',
+                organizationId: 'test-org-id',
+                organizationName: 'Test Organization',
+                organizationRole: 'admin'
               });
+              
+              console.log('Using fallback user data for development');
               setRole(role || 'user');
             } else {
               // Clear invalid token
@@ -113,8 +123,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           email: userData.email || email,
           fullName: userData.fullName || fullName || email.split('@')[0],
           photoUrl: userData.photoUrl,
-          role: userData.role || 'user'
+          role: userData.role || 'user',
+          organizationId: userData.organizationId,
+          organizationName: userData.organizationName,
+          organizationRole: userData.organizationRole
         });
+        
+        console.log('User data from registration:', userData);
         setRole(userData.role || 'user');
         
         // Store token
@@ -173,8 +188,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             id: '1',
             email,
             fullName: 'Test User',
-            role: 'user'
+            role: 'user',
+            organizationId: 'test-org-id',
+            organizationName: 'Test Organization',
+            organizationRole: 'admin'
           });
+          
+          console.log('Using fallback user data for test login');
           setRole('user');
           return true;
         } else {
