@@ -143,20 +143,27 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
         throw new Error(response.error);
       }
       
-      if (response.data && response.data.member) {
+      if (response.data) {
         // Add the new member to the local state
-        setMembers([...members, response.data.member]);
-        
-        // Reset form inputs
-        setNameInput('');
-        setEmailInput('');
-        setPhoneInput('');
-        setPositionInput('');
-        
-        showNotification('Member added successfully', 'success');
-        console.log('Member added successfully');
+        // The response.data contains both memberId and member properties
+        if (response.data.member) {
+          setMembers([...members, response.data.member]);
+          
+          // Reset form inputs
+          setNameInput('');
+          setEmailInput('');
+          setPhoneInput('');
+          setPositionInput('');
+          
+          showNotification('Member added successfully', 'success');
+          console.log('Member added successfully');
+        } else {
+          console.log('No member data in response:', response.data);
+          // If for some reason the member property is missing, try to fetch members again
+          fetchMembers();
+        }
       } else {
-        console.log('No member data in response');
+        console.log('No data in response');
       }
     } catch (err) {
       showNotification(err instanceof Error ? err.message : 'Failed to add member', 'error');
