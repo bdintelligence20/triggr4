@@ -1,5 +1,5 @@
 // components/chat/ChatSources.tsx
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { FileText, ExternalLink, ChevronDown, ChevronUp, File, FileImage } from 'lucide-react';
 import { Source } from '../../types';
 
@@ -10,12 +10,28 @@ interface ChatSourcesProps {
 const ChatSources: React.FC<ChatSourcesProps> = ({ sources }) => {
   const [expanded, setExpanded] = useState(false);
 
-  // Sort sources by relevance score (highest first)
-  const sortedSources = [...sources].sort((a, b) => b.relevance_score - a.relevance_score);
+  // Ensure sources are unique by ID and keep the highest relevance score
+  const uniqueSources = useMemo(() => {
+    const sourceMap: Record<string, Source> = {};
+    
+    sources.forEach(source => {
+      const id = source.id;
+      if (!sourceMap[id] || source.relevance_score > sourceMap[id].relevance_score) {
+        sourceMap[id] = source;
+      }
+    });
+    
+    return Object.values(sourceMap);
+  }, [sources]);
+  
+  // Sort unique sources by relevance score (highest first)
+  const sortedSources = useMemo(() => {
+    return [...uniqueSources].sort((a, b) => b.relevance_score - a.relevance_score);
+  }, [uniqueSources]);
   
   // Get the top 3 sources for the collapsed view
   const topSources = sortedSources.slice(0, 3);
-  const hasMoreSources = sources.length > 3;
+  const hasMoreSources = sortedSources.length > 3;
 
   // Get source name - use document title if available, otherwise format the ID
   const getSourceName = (source: Source) => {
@@ -46,7 +62,7 @@ const ChatSources: React.FC<ChatSourcesProps> = ({ sources }) => {
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium text-gray-500 dark:text-gray-400 flex items-center">
           <FileText size={14} className="mr-1" />
-          Sources ({sources.length})
+          Sources ({uniqueSources.length})
         </p>
         {hasMoreSources && (
           <button 

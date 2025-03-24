@@ -87,14 +87,6 @@ def create_app():
     app.config['ALLOWED_EXTENSIONS'] = {'pdf', 'doc', 'docx', 'txt'}
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-    # Register CORS headers
-    @app.after_request
-    def add_cors_headers(response):
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-        return response
-
     # Register blueprints
     from routes.auth_routes import auth_bp
     from routes.document_routes import document_bp

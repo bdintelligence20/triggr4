@@ -3,6 +3,19 @@ import { useRef, useEffect } from 'react';
 import { useAppContext } from '../contexts/AppContext';
 import { API_URL, QueryResponse, ChatMessage } from '../types';
 
+// Approximate token counting function for client-side estimation
+// This is a simplified version and won't be as accurate as the server-side tiktoken
+const estimateTokenCount = (text: string): number => {
+  if (!text) return 0;
+  
+  // GPT models use roughly 4 characters per token on average
+  // This is a very rough estimate
+  return Math.ceil(text.length / 4);
+};
+
+// Maximum tokens to include in conversation history
+const MAX_HISTORY_TOKENS = 6000;
+
 export const useChat = () => {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   
@@ -17,16 +30,29 @@ export const useChat = () => {
     setActiveEventSource
   } = useAppContext();
   
-  // Build conversation history from the current chat messages
+  // Build conversation history from the current chat messages with token management
   const buildConversationHistory = () => {
-    // Optionally limit to the last 10 messages to avoid token overload
-    const recentMessages = chatMessages.slice(-10);
-    return recentMessages
-      .map(msg => {
-        const prefix = msg.sender === 'user' ? "User:" : "AI:";
-        return `${prefix} ${msg.content}`;
-      })
-      .join("\n");
+    // Start with the most recent messages and work backwards
+    const reversedMessages = [...chatMessages].reverse();
+    const historyParts: string[] = [];
+    let tokenCount = 0;
+    
+    for (const msg of reversedMessages) {
+      const prefix = msg.sender === 'user' ? "User:" : "AI:";
+      const formattedMsg = `${prefix} ${msg.content}`;
+      const msgTokens = estimateTokenCount(formattedMsg);
+      
+      // If adding this message would exceed our token budget, stop
+      if (tokenCount + msgTokens > MAX_HISTORY_TOKENS) {
+        break;
+      }
+      
+      // Add message to history and update token count
+      historyParts.unshift(formattedMsg);
+      tokenCount += msgTokens;
+    }
+    
+    return historyParts.join("\n");
   };
   
   const handleSendMessage = async () => {

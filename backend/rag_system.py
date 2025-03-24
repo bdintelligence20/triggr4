@@ -1,9 +1,12 @@
 import os
 import logging
+import re
+import threading
+import hashlib
 from typing import List, Dict, Any, Callable
 import anthropic
 import time
-from embedding_utils import EmbeddingService, chunk_text
+from embedding_utils import EmbeddingService, chunk_text, TOKENIZER
 from pinecone_client import PineconeClient
 
 # Import CrossEncoder for re-ranking (install via: pip install sentence-transformers)
@@ -13,6 +16,17 @@ cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Token budget constants
+MAX_TOTAL_TOKENS = 30000  # Set a safe limit below the 40,000/min rate limit
+MAX_CONTEXT_TOKENS = 20000  # Reserve tokens for context
+MAX_HISTORY_TOKENS = 8000  # Reserve tokens for history
+
+def count_tokens(text: str) -> int:
+    """Count tokens in text using tiktoken."""
+    if not text:
+        return 0
+    return len(TOKENIZER.encode(text))
 
 def re_rank_passages(query: str, passages: List[str]) -> List[str]:
     """
@@ -38,6 +52,70 @@ def re_rank_matched_docs(query: str, matched_docs: List[Dict[str, Any]]) -> List
                 break
     return ranked_docs
 
+class TokenRateLimiter:
+    def __init__(self, tokens_per_minute=40000):
+        self.tokens_per_minute = tokens_per_minute
+        self.token_bucket = tokens_per_minute
+        self.last_refill = time.time()
+        self.lock = threading.Lock()
+        
+    def consume(self, tokens):
+        """Try to consume tokens from the bucket. Returns True if successful."""
+        with self.lock:
+            # Refill the bucket based on elapsed time
+            now = time.time()
+            elapsed = now - self.last_refill
+            refill = min(self.tokens_per_minute, 
+                         self.token_bucket + int(elapsed * (self.tokens_per_minute / 60)))
+            self.token_bucket = refill
+            self.last_refill = now
+            
+            # Check if we can consume tokens
+            if tokens <= self.token_bucket:
+                self.token_bucket -= tokens
+                return True
+            return False
+            
+    def wait_for_tokens(self, tokens, timeout=30):
+        """Wait until tokens are available. Returns False if timeout reached."""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self.consume(tokens):
+                return True
+            time.sleep(0.5)
+        return False
+
+class ResponseCache:
+    def __init__(self, max_size=100):
+        self.cache = {}
+        self.max_size = max_size
+        self.lock = threading.Lock()
+        
+    def get(self, query, context_hash):
+        """Get cached response for query+context combination."""
+        key = self._make_key(query, context_hash)
+        with self.lock:
+            return self.cache.get(key)
+            
+    def set(self, query, context_hash, response):
+        """Cache a response."""
+        key = self._make_key(query, context_hash)
+        with self.lock:
+            # Implement LRU eviction if needed
+            if len(self.cache) >= self.max_size:
+                # Remove oldest key
+                oldest_key = next(iter(self.cache))
+                del self.cache[oldest_key]
+            self.cache[key] = response
+            
+    def _make_key(self, query, context_hash):
+        """Create a cache key from query and context hash."""
+        return f"{query.strip().lower()}:{context_hash}"
+        
+    def _hash_context(self, context):
+        """Create a hash of the context text."""
+        return hashlib.md5(context.encode()).hexdigest()
+
 class RAGSystem:
     def __init__(self, openai_api_key=None, anthropic_api_key=None, pinecone_api_key=None, index_name="knowledge-hub-vectors", organization_id=None):
         """Initialize the RAG system with necessary components."""
@@ -60,6 +138,8 @@ class RAGSystem:
             organization_id=organization_id
         )
         self.anthropic_client = anthropic.Client(api_key=self.anthropic_api_key)
+        self.rate_limiter = TokenRateLimiter()
+        self.response_cache = ResponseCache()
         
         logger.info(f"RAG system initialized successfully for organization: {organization_id or 'global'}")
         
@@ -87,6 +167,117 @@ class RAGSystem:
         
         return vectors_stored
         
+    def _is_follow_up_question(self, query, history):
+        """Detect if this is a follow-up question."""
+        follow_up_patterns = [
+            r"(?i)what about",
+            r"(?i)can you",
+            r"(?i)how about",
+            r"(?i)tell me more",
+            r"(?i)elaborate",
+            r"(?i)explain",
+            r"(?i)why",
+            r"(?i)^and ",
+            r"(?i)^but ",
+            r"(?i)^so ",
+        ]
+        
+        # Check for pronouns that suggest follow-up
+        pronoun_patterns = [
+            r"(?i)\bthat\b",
+            r"(?i)\bit\b",
+            r"(?i)\bthis\b",
+            r"(?i)\bthese\b",
+            r"(?i)\bthose\b",
+            r"(?i)\bthem\b",
+        ]
+        
+        # Check if history exists (indicating ongoing conversation)
+        has_history = bool(history.strip())
+        
+        # Check for follow-up patterns
+        for pattern in follow_up_patterns:
+            if re.search(pattern, query):
+                return True
+                
+        # Check for pronouns (only if history exists)
+        if has_history:
+            for pattern in pronoun_patterns:
+                if re.search(pattern, query):
+                    return True
+                    
+        return False
+
+    def _is_clarification_question(self, query):
+        """Detect if this is asking for clarification of previous answer."""
+        clarification_patterns = [
+            r"(?i)what do you mean",
+            r"(?i)can you clarify",
+            r"(?i)don't understand",
+            r"(?i)put .* in a table",
+            r"(?i)summarize",
+            r"(?i)simplify",
+            r"(?i)rephrase",
+        ]
+        
+        for pattern in clarification_patterns:
+            if re.search(pattern, query):
+                return True
+                
+        return False
+        
+    def _truncate_history(self, history, max_tokens):
+        """Truncate history while preserving most recent exchanges."""
+        if not history:
+            return ""
+            
+        lines = history.split('\n')
+        
+        # Always keep the most recent user-AI exchange
+        preserved_lines = []
+        i = len(lines) - 1
+        
+        # Find and preserve the most recent exchange
+        user_found = False
+        while i >= 0 and not user_found:
+            if lines[i].startswith('User:'):
+                user_found = True
+                # Add this user message and look for corresponding AI response
+                preserved_lines.insert(0, lines[i])
+            elif lines[i].startswith('AI:') and not user_found:
+                # Add the most recent AI message
+                preserved_lines.insert(0, lines[i])
+            i -= 1
+        
+        # Add as many previous exchanges as the token budget allows
+        remaining_lines = []
+        remaining_tokens = max_tokens - count_tokens('\n'.join(preserved_lines))
+        
+        current_exchange = []
+        for j in range(i, -1, -1):
+            line = lines[j]
+            line_tokens = count_tokens(line)
+            
+            if line.startswith('User:'):
+                current_exchange.insert(0, line)
+            elif line.startswith('AI:'):
+                current_exchange.insert(0, line)
+                
+                # Check if we can add this complete exchange
+                exchange_text = '\n'.join(current_exchange)
+                exchange_tokens = count_tokens(exchange_text)
+                
+                if exchange_tokens <= remaining_tokens:
+                    remaining_lines = current_exchange + remaining_lines
+                    remaining_tokens -= exchange_tokens
+                    current_exchange = []
+                else:
+                    # Can't fit this exchange, stop adding more
+                    break
+        
+        # Combine preserved and remaining lines
+        return '\n'.join(remaining_lines + preserved_lines)
+
     def query(self, user_query, namespace=None, top_k=5, category=None, stream_callback=None, history=""):
         """
         Query the system with a user question and return an AI response using retrieved context.
@@ -94,6 +285,20 @@ class RAGSystem:
         """
         logger.info(f"Processing query: '{user_query}'")
         
+        # Determine query complexity and adjust top_k
+        is_follow_up = self._is_follow_up_question(user_query, history)
+        is_clarification = self._is_clarification_question(user_query)
+        
+        if is_clarification:
+            effective_top_k = 2  # Minimal context for clarifications
+            logger.info(f"Detected clarification question, using reduced context (top_k={effective_top_k})")
+        elif is_follow_up:
+            effective_top_k = 3  # Moderate context for follow-ups
+            logger.info(f"Detected follow-up question, using moderate context (top_k={effective_top_k})")
+        else:
+            effective_top_k = top_k  # Full context for new queries
+            logger.info(f"Detected new question, using full context (top_k={effective_top_k})")
+
         # Step 1: Generate embedding for the query
         query_embedding = self.embedding_service.get_embedding(user_query)
         if not query_embedding:
@@ -107,7 +312,7 @@ class RAGSystem:
         filter_dict = None
         
         # Step 2: Query Pinecone with extra candidates
-        extended_top_k = min(top_k + 3, 10)  # Get a few extra candidates
+        extended_top_k = min(effective_top_k + 3, 10)  # Get a few extra candidates
         matched_docs = self.pinecone_client.query_vectors(
             query_embedding, 
             namespace=namespace,
@@ -128,45 +333,108 @@ class RAGSystem:
         matched_docs = re_rank_matched_docs(user_query, matched_docs)
         logger.info("Documents re-ranked based on query relevance")
         
-        # Step 3: Prepare context from the top_k documents
-        context_chunks = []
-        for i, doc in enumerate(matched_docs[:top_k]):
-            context_chunks.append(f"Document {i+1}:\n{doc['text']}")
-        context_text = "\n\n---\n\n".join(context_chunks)
-        
-        # Prepare source information for citation with document metadata
-        sources = []
-        for i, doc in enumerate(matched_docs[:top_k]):
+        # Deduplicate sources by source_id while preserving the highest relevance score
+        deduplicated_sources = {}
+        for doc in matched_docs[:effective_top_k]:
             source_id = doc.get('source_id', 'unknown')
+            current_score = doc.get('score', 0)
             
-            # Get document metadata from Firestore
-            try:
-                from firebase_admin import firestore
-                db = firestore.client()
-                doc_ref = db.collection("knowledge_items").document(source_id)
-                doc_data = doc_ref.get().to_dict() if doc_ref.get().exists else {}
-                
-                sources.append({
-                    "id": source_id,
-                    "relevance_score": doc.get('score', 0),
-                    "document": {
-                        "title": doc_data.get('title', 'Unknown Document'),
-                        "file_type": doc_data.get('file_type', 'unknown'),
-                        "file_url": doc_data.get('file_url', None)
+            if source_id not in deduplicated_sources or current_score > deduplicated_sources[source_id]['score']:
+                # Get document metadata from Firestore
+                try:
+                    from firebase_admin import firestore
+                    db = firestore.client()
+                    doc_ref = db.collection("knowledge_items").document(source_id)
+                    doc_data = doc_ref.get().to_dict() if doc_ref.get().exists else {}
+                    
+                    deduplicated_sources[source_id] = {
+                        "id": source_id,
+                        "relevance_score": current_score,
+                        "document": {
+                            "title": doc_data.get('title', 'Unknown Document'),
+                            "file_type": doc_data.get('file_type', 'unknown'),
+                            "file_url": doc_data.get('file_url', None)
+                        },
+                        "text": doc['text']  # Keep the text for context
                     }
-                })
-            except Exception as e:
-                logger.warning(f"Error fetching document metadata for {source_id}: {str(e)}")
-                # Fallback to basic source info if metadata fetch fails
-                sources.append({
-                    "id": source_id,
-                    "relevance_score": doc.get('score', 0)
-                })
+                except Exception as e:
+                    logger.warning(f"Error fetching document metadata for {source_id}: {str(e)}")
+                    # Fallback to basic source info if metadata fetch fails
+                    deduplicated_sources[source_id] = {
+                        "id": source_id,
+                        "relevance_score": current_score,
+                        "text": doc['text']  # Keep the text for context
+                    }
+        
+        # Apply token budget to context
+        context_chunks = []
+        context_tokens = 0
+        
+        for i, (source_id, source) in enumerate(deduplicated_sources.items()):
+            chunk_tokens = count_tokens(source['text'])
+            
+            # Check if adding this chunk would exceed our context token budget
+            if context_tokens + chunk_tokens > MAX_CONTEXT_TOKENS:
+                logger.info(f"Token budget reached after {i} chunks, stopping context addition")
+                break
+                
+            context_chunks.append(f"Document {i+1}:\n{source['text']}")
+            context_tokens += chunk_tokens
+        
+        context_text = "\n\n---\n\n".join(context_chunks)
+        logger.info(f"Context prepared with {len(context_chunks)} chunks, {context_tokens} tokens")
+        
+        # Smart history truncation
+        history_tokens = count_tokens(history)
+        if history_tokens > MAX_HISTORY_TOKENS:
+            logger.info(f"History exceeds token budget ({history_tokens} > {MAX_HISTORY_TOKENS}), truncating")
+            history = self._truncate_history(history, MAX_HISTORY_TOKENS)
+            history_tokens = count_tokens(history)
+            logger.info(f"History truncated to {history_tokens} tokens")
+        
+        # Convert deduplicated_sources dict to list for the response
+        sources = []
+        for source_id, source_data in deduplicated_sources.items():
+            source_info = {
+                "id": source_id,
+                "relevance_score": source_data["relevance_score"]
+            }
+            
+            if "document" in source_data:
+                source_info["document"] = source_data["document"]
+                
+            sources.append(source_info)
+        
+        # Check total token count
+        prompt_tokens = context_tokens + history_tokens + count_tokens(user_query) + 500  # 500 for prompt template
+        logger.info(f"Total estimated prompt tokens: {prompt_tokens}")
+        
+        # Check if we have enough tokens in our rate limit budget
+        if not self.rate_limiter.consume(prompt_tokens):
+            logger.warning(f"Rate limit would be exceeded with {prompt_tokens} tokens, waiting for token availability")
+            if not self.rate_limiter.wait_for_tokens(prompt_tokens, timeout=10):
+                logger.error("Timeout waiting for token availability")
+                return {
+                    "answer": "I'm currently handling too many requests. Please try again in a moment.",
+                    "sources": sources
+                }
+        
+        # Check response cache for similar queries
+        context_hash = hashlib.md5(context_text.encode()).hexdigest()
+        cached_response = self.response_cache.get(user_query, context_hash)
+        if cached_response:
+            logger.info("Using cached response for similar query")
+            return {
+                "answer": cached_response,
+                "sources": sources
+            }
         
         try:
             if stream_callback is None:
                 # Non-streaming response: include conversation history in the prompt
                 response = self.generate_response(context_text, user_query, lambda _: None, conversation_history=history)
+                # Cache the response
+                self.response_cache.set(user_query, context_hash, response)
                 return {
                     "answer": response,
                     "sources": sources

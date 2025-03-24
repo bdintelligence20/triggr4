@@ -413,26 +413,61 @@ def whatsapp_webhook():
         send_whatsapp_message(from_number, "⏳ I'm searching through our knowledge base...")
         
         try:
-            # Initialize custom RAG system with organization ID
-            whatsapp_rag = RAGSystem(
-                openai_api_key=OPENAI_API_KEY,
-                anthropic_api_key=ANTHROPIC_API_KEY,
-                pinecone_api_key=PINECONE_API_KEY,
-                index_name=PINECONE_INDEX_NAME,
-                organization_id=organization_id  # Pass organization ID to filter results
-            )
-            
-            # Collect the full response
-            accumulated_text = []
-            
-            def stream_callback(chunk):
-                accumulated_text.append(chunk)
-            
-            # Query the RAG system
-            result = whatsapp_rag.query(
-                user_query=incoming_msg,
-                stream_callback=stream_callback
-            )
+            try:
+                # Initialize custom RAG system with organization ID
+                whatsapp_rag = RAGSystem(
+                    openai_api_key=OPENAI_API_KEY,
+                    anthropic_api_key=ANTHROPIC_API_KEY,
+                    pinecone_api_key=PINECONE_API_KEY,
+                    index_name=PINECONE_INDEX_NAME,
+                    organization_id=organization_id  # Pass organization ID to filter results
+                )
+                
+                # Get previous conversation history for this member if available
+                conversation_history = ""
+                try:
+                    # Get the last 5 WhatsApp conversations for this member
+                    conv_query = db.collection("whatsapp_conversations") \
+                        .where("memberId", "==", member.get('id')) \
+                        .where("organizationId", "==", organization_id) \
+                        .order_by("timestamp", direction=firestore.Query.DESCENDING) \
+                        .limit(10)
+                    
+                    conversations = list(conv_query.stream())
+                    
+                    if conversations:
+                        # Format conversations as history
+                        history_parts = []
+                        for conv in reversed(conversations):
+                            conv_data = conv.to_dict()
+                            if conv_data.get("from") == from_number:
+                                history_parts.append(f"User: {conv_data.get('message', '')}")
+                            elif conv_data.get("from") == "system":
+                                history_parts.append(f"AI: {conv_data.get('message', '')}")
+                        
+                        conversation_history = "\n".join(history_parts)
+                        logger.info(f"Retrieved conversation history for member {member.get('id')}")
+                except Exception as e:
+                    logger.warning(f"Error retrieving conversation history: {str(e)}")
+                
+                # Collect the full response
+                accumulated_text = []
+                
+                def stream_callback(chunk):
+                    accumulated_text.append(chunk)
+                
+                # Query the RAG system with conversation history
+                result = whatsapp_rag.query(
+                    user_query=incoming_msg,
+                    stream_callback=stream_callback,
+                    history=conversation_history
+                )
+            except Exception as e:
+                logger.error(f"Error initializing RAG system: {str(e)}")
+                return send_whatsapp_message(
+                    from_number, 
+                    "❌ I'm sorry, I encountered an error setting up the knowledge base. Please try again later."
+                )
             
             # Get the full response
             full_text = ''.join(accumulated_text) if accumulated_text else result.get("answer", "")
