@@ -324,3 +324,35 @@ export async function sendWhatsAppVerification(memberId: string): Promise<ApiRes
     body: JSON.stringify({ memberId }),
   });
 }
+
+// Send bulk WhatsApp message to members
+export async function sendBulkWhatsAppMessage(data: {
+  title: string;
+  message: string;
+  memberIds?: string[];
+  sendEmail?: boolean;
+  sendInApp?: boolean;
+  scheduledFor?: string;
+}): Promise<ApiResponse<{
+  broadcastId: string;
+  status: string;
+  totalCount: number;
+  successCount: number;
+  failedCount: number;
+  results: any[];
+}>> {
+  return fetchApi<{
+    broadcastId: string;
+    status: string;
+    totalCount: number;
+    successCount: number;
+    failedCount: number;
+    results: any[];
+  }>('/whatsapp/send-bulk-message', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+}

@@ -1,16 +1,37 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Bold, Italic, List, Link, Paperclip, Calendar, Apple as WhatsApp, Mail, Bell, Upload, X } from 'lucide-react';
-import { Button } from '../../../ui/button';
+import { Bold, Italic, List, Link as LinkIcon, Paperclip, Calendar, Apple as WhatsApp, Mail, Bell, Upload, X, Loader } from 'lucide-react';
+import { Button } from '../../../ui/Button';
 import useRoleStore from '../../../../store/roleStore';
 import { demoHubs } from '../../../data/demo-data';
+import * as api from '../../../../services/api';
+import { useAuth } from '../../../../contexts/AuthContext';
+import { useAppContext } from '../../../../contexts/AppContext';
+
+interface Member {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  position: string;
+  role: string;
+  status: 'active' | 'pending';
+  organizationId: string;
+  whatsappVerified: boolean;
+}
 
 const NewAnnouncement = () => {
   const { currentRole } = useRoleStore();
+  const { user } = useAuth();
+  const { showNotification } = useAppContext();
+  const [members, setMembers] = useState<Member[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     message: '',
-    selectedHubs: [] as number[],
+    selectedHubs: [] as string[],
     deliveryMethods: {
       whatsapp: true,
       email: true,
@@ -46,9 +67,101 @@ const NewAnnouncement = () => {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    fetchMembers();
+  }, []);
+
+  const fetchMembers = async () => {
+    if (!user?.organizationId) return;
+    
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      // Call the API to fetch members
+      const response = await api.getMembers();
+      
+      if (response.error) {
+        throw new Error(response.error);
+      }
+      
+      if (response.data && response.data.members) {
+        setMembers(response.data.members);
+      } else {
+        setMembers([]);
+      }
+    } catch (err) {
+      setError('Failed to fetch members. Please try again.');
+      console.error('Error fetching members:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Submitting announcement:', formData);
+    
+    if (!formData.message.trim()) {
+      showNotification('Please enter a message', 'error');
+      return;
+    }
+    
+    setIsSending(true);
+    setError(null);
+    
+    try {
+      // Get selected member IDs
+      const selectedMemberIds = members
+        .filter(member => 
+          member.whatsappVerified && 
+          (formData.selectedHubs.length === 0 || 
+           formData.selectedHubs.includes(member.id))
+        )
+        .map(member => member.id);
+      
+      if (selectedMemberIds.length === 0) {
+        showNotification('No verified WhatsApp members found to send to', 'error');
+        setIsSending(false);
+        return;
+      }
+      
+      // Call the API to send the bulk message
+      const response = await api.sendBulkWhatsAppMessage({
+        title: formData.title,
+        message: formData.message,
+        memberIds: selectedMemberIds,
+        sendEmail: formData.deliveryMethods.email,
+        sendInApp: formData.deliveryMethods.inApp,
+        scheduledFor: formData.scheduledDate || undefined
+      });
+      
+      if (response.error) {
+        throw new Error(response.error);
+      }
+      
+      // Show success notification
+      showNotification(`Message sent to ${response.data?.successCount || 0} members`);
+      
+      // Reset form
+      setFormData({
+        title: '',
+        message: '',
+        selectedHubs: [],
+        deliveryMethods: {
+          whatsapp: true,
+          email: true,
+          inApp: true
+        },
+        scheduledDate: '',
+        attachments: []
+      });
+      
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send message');
+      showNotification('Failed to send message', 'error');
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
@@ -107,7 +220,7 @@ const NewAnnouncement = () => {
                 className="p-1.5 hover:bg-gray-200 rounded"
                 title="Add Link"
               >
-                <Link size={16} />
+                <LinkIcon size={16} />
               </button>
             </div>
             <textarea
@@ -121,32 +234,68 @@ const NewAnnouncement = () => {
           </div>
         </div>
 
-        {/* Hub Selection (for Super Admin only) */}
-        {currentRole === 'super_admin' && (
+          {/* Member Selection */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Select Hubs
+              Recipients
             </label>
-            <div className="space-y-2">
-              {demoHubs.map(hub => (
-                <label key={hub.id} className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={formData.selectedHubs.includes(hub.id)}
-                    onChange={(e) => {
-                      const newHubs = e.target.checked
-                        ? [...formData.selectedHubs, hub.id]
-                        : formData.selectedHubs.filter(id => id !== hub.id);
-                      setFormData(prev => ({ ...prev, selectedHubs: newHubs }));
-                    }}
-                    className="w-4 h-4 text-emerald-400 border-gray-300 rounded focus:ring-emerald-400"
-                  />
-                  <span className="text-sm text-gray-700">{hub.name}</span>
-                </label>
-              ))}
+            <div className="border rounded-lg p-4 max-h-60 overflow-y-auto">
+              {isLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader className="animate-spin text-emerald-500 mr-2" size={20} />
+                  <span className="text-gray-500">Loading members...</span>
+                </div>
+              ) : members.length === 0 ? (
+                <div className="text-center py-4 text-gray-500">
+                  No members found
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 pb-2 border-b border-gray-200">
+                    <input
+                      type="checkbox"
+                      checked={formData.selectedHubs.length === 0}
+                      onChange={() => {
+                        setFormData(prev => ({ 
+                          ...prev, 
+                          selectedHubs: prev.selectedHubs.length > 0 ? [] : members.map(m => m.id)
+                        }));
+                      }}
+                      className="w-4 h-4 text-emerald-400 border-gray-300 rounded focus:ring-emerald-400"
+                    />
+                    <span className="text-sm font-medium text-gray-700">All Members</span>
+                    <span className="text-xs text-gray-500 ml-2">
+                      ({members.filter(m => m.whatsappVerified).length} WhatsApp verified)
+                    </span>
+                  </label>
+                  
+                  {members.map(member => (
+                    <label key={member.id} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={formData.selectedHubs.length === 0 || formData.selectedHubs.includes(member.id)}
+                        onChange={(e) => {
+                          const memberId = member.id;
+                          const newHubs = e.target.checked
+                            ? [...formData.selectedHubs, memberId]
+                            : formData.selectedHubs.filter(id => id !== memberId);
+                          setFormData(prev => ({ ...prev, selectedHubs: newHubs }));
+                        }}
+                        disabled={!member.whatsappVerified}
+                        className="w-4 h-4 text-emerald-400 border-gray-300 rounded focus:ring-emerald-400 disabled:opacity-50"
+                      />
+                      <span className={`text-sm ${!member.whatsappVerified ? 'text-gray-400' : 'text-gray-700'}`}>
+                        {member.name}
+                      </span>
+                      {!member.whatsappVerified && (
+                        <span className="text-xs text-red-500 ml-2">(Not WhatsApp verified)</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
-        )}
 
         {/* Delivery Methods */}
         <div>
@@ -245,6 +394,13 @@ const NewAnnouncement = () => {
           </div>
         </div>
 
+        {/* Error message */}
+        {error && (
+          <div className="p-3 bg-red-50 text-red-600 rounded-lg">
+            {error}
+          </div>
+        )}
+
         {/* Schedule */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -264,8 +420,16 @@ const NewAnnouncement = () => {
             <Button
               type="submit"
               className="flex-shrink-0"
+              disabled={isSending}
             >
-              Send Now
+              {isSending ? (
+                <>
+                  <Loader className="animate-spin mr-2" size={16} />
+                  Sending...
+                </>
+              ) : (
+                'Send Now'
+              )}
             </Button>
           </div>
         </div>

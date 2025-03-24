@@ -8,6 +8,7 @@ from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
 from rag_system import RAGSystem
 from utils import split_message_semantically
+from datetime import datetime
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -152,6 +153,214 @@ def handle_verification_code(from_number, message):
     except Exception as e:
         logger.error(f"Error verifying WhatsApp: {str(e)}")
         return create_twilio_response("❌ An error occurred during verification. Please try again later.")
+
+# Send bulk WhatsApp messages to members
+@whatsapp_bp.route('/send-bulk-message', methods=['POST'])
+def send_bulk_message():
+    """Send a WhatsApp message to multiple members."""
+    try:
+        # Get the user ID from the request
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        token = auth_header.split(' ')[1]
+        
+        # Get the user from Firestore
+        users_ref = db.collection('users')
+        user_query = users_ref.where('auth_token', '==', token).limit(1).get()
+        
+        if not user_query:
+            return jsonify({'error': 'User not found'}), 404
+        
+        user_data = user_query[0].to_dict()
+        organization_id = user_data.get('organizationId')
+        
+        if not organization_id:
+            return jsonify({'error': 'User does not belong to an organization'}), 400
+        
+        # Get the message data from the request
+        data = request.json
+        
+        # Validate required fields
+        if not data.get('message'):
+            return jsonify({'error': 'Message is required'}), 400
+        
+        # Get the member IDs or filter criteria
+        member_ids = data.get('memberIds', [])
+        
+        # If no member IDs are provided, get all members for the organization
+        if not member_ids:
+            members_ref = db.collection('members')
+            members_query = members_ref.where('organizationId', '==', organization_id).get()
+            
+            member_ids = [doc.id for doc in members_query]
+        
+        if not member_ids:
+            return jsonify({'error': 'No members found for this organization'}), 404
+        
+        # Create a broadcast record
+        broadcast_id = str(uuid.uuid4())
+        broadcast_data = {
+            'title': data.get('title', 'Broadcast Message'),
+            'message': data.get('message'),
+            'organizationId': organization_id,
+            'senderId': user_query[0].id,
+            'senderName': user_data.get('fullName', 'Unknown'),
+            'senderRole': user_data.get('role', 'user'),
+            'recipientCount': len(member_ids),
+            'recipientIds': member_ids,
+            'deliveryMethods': {
+                'whatsapp': True,
+                'email': data.get('sendEmail', False),
+                'inApp': data.get('sendInApp', False)
+            },
+            'status': 'processing',
+            'createdAt': firestore.SERVER_TIMESTAMP,
+            'scheduledFor': data.get('scheduledFor'),
+            'hasAttachments': False
+        }
+        
+        # Add the broadcast to Firestore
+        db.collection('broadcasts').document(broadcast_id).set(broadcast_data)
+        
+        # Send the message to each member
+        success_count = 0
+        failed_count = 0
+        results = []
+        
+        for member_id in member_ids:
+            try:
+                # Get the member from Firestore
+                member_doc = db.collection('members').document(member_id).get()
+                
+                if not member_doc.exists:
+                    results.append({
+                        'memberId': member_id,
+                        'status': 'failed',
+                        'error': 'Member not found'
+                    })
+                    failed_count += 1
+                    continue
+                
+                member_data = member_doc.to_dict()
+                
+                # Check if the member belongs to the user's organization
+                if member_data.get('organizationId') != organization_id:
+                    results.append({
+                        'memberId': member_id,
+                        'status': 'failed',
+                        'error': 'Member does not belong to your organization'
+                    })
+                    failed_count += 1
+                    continue
+                
+                # Check if the member has a verified WhatsApp number
+                if not member_data.get('whatsappVerified'):
+                    results.append({
+                        'memberId': member_id,
+                        'status': 'failed',
+                        'error': 'Member does not have a verified WhatsApp number'
+                    })
+                    failed_count += 1
+                    continue
+                
+                # Get the member's phone number
+                phone_number = member_data.get('phone')
+                
+                if not phone_number:
+                    results.append({
+                        'memberId': member_id,
+                        'status': 'failed',
+                        'error': 'Member does not have a phone number'
+                    })
+                    failed_count += 1
+                    continue
+                
+                # Send the message
+                try:
+                    # Format the message with personalization if needed
+                    personalized_message = data.get('message').replace('{name}', member_data.get('name', 'Member'))
+                    
+                    # Send the WhatsApp message
+                    send_whatsapp_message(phone_number, personalized_message)
+                    
+                    # Record the successful delivery
+                    results.append({
+                        'memberId': member_id,
+                        'status': 'sent',
+                        'phone': phone_number
+                    })
+                    success_count += 1
+                    
+                    # Add a delivery record
+                    delivery_id = str(uuid.uuid4())
+                    delivery_data = {
+                        'broadcastId': broadcast_id,
+                        'memberId': member_id,
+                        'memberName': member_data.get('name', 'Unknown'),
+                        'memberPhone': phone_number,
+                        'status': 'sent',
+                        'sentAt': firestore.SERVER_TIMESTAMP,
+                        'deliveryMethod': 'whatsapp'
+                    }
+                    
+                    db.collection('broadcast_deliveries').document(delivery_id).set(delivery_data)
+                    
+                except Exception as e:
+                    logger.error(f"Error sending WhatsApp message to {phone_number}: {str(e)}")
+                    results.append({
+                        'memberId': member_id,
+                        'status': 'failed',
+                        'error': str(e),
+                        'phone': phone_number
+                    })
+                    failed_count += 1
+                    
+                    # Add a failed delivery record
+                    delivery_id = str(uuid.uuid4())
+                    delivery_data = {
+                        'broadcastId': broadcast_id,
+                        'memberId': member_id,
+                        'memberName': member_data.get('name', 'Unknown'),
+                        'memberPhone': phone_number,
+                        'status': 'failed',
+                        'error': str(e),
+                        'sentAt': firestore.SERVER_TIMESTAMP,
+                        'deliveryMethod': 'whatsapp'
+                    }
+                    
+                    db.collection('broadcast_deliveries').document(delivery_id).set(delivery_data)
+            
+            except Exception as e:
+                logger.error(f"Error processing member {member_id}: {str(e)}")
+                results.append({
+                    'memberId': member_id,
+                    'status': 'failed',
+                    'error': str(e)
+                })
+                failed_count += 1
+        
+        # Update the broadcast record with the results
+        db.collection('broadcasts').document(broadcast_id).update({
+            'status': 'completed',
+            'completedAt': firestore.SERVER_TIMESTAMP,
+            'successCount': success_count,
+            'failedCount': failed_count
+        })
+        
+        return jsonify({
+            'broadcastId': broadcast_id,
+            'status': 'completed',
+            'totalCount': len(member_ids),
+            'successCount': success_count,
+            'failedCount': failed_count,
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error sending bulk message: {str(e)}")
+        return jsonify({'error': f'Failed to send bulk message: {str(e)}'}), 500
 
 @whatsapp_bp.route('/whatsapp-webhook', methods=['POST'])
 def whatsapp_webhook():

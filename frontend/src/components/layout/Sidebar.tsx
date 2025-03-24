@@ -1,7 +1,7 @@
 // components/layout/Sidebar.tsx
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Book, FileText, Plug, ChevronDown, ChevronRight, Plus, MessageSquare, LogOut } from 'lucide-react';
+import { Book, FileText, Plug, ChevronDown, ChevronRight, Plus, MessageSquare, LogOut, Bell } from 'lucide-react';
 import { useAppContext } from '../../contexts/AppContext';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -80,6 +80,18 @@ const Sidebar: React.FC = () => {
             >
               <Book size={20} className="mr-3" />
               <span>Library</span>
+            </Link>
+            
+            <Link
+              to="/notify"
+              className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
+                isActive('/notify') 
+                  ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
+                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+              }`}
+            >
+              <Bell size={20} className="mr-3" />
+              <span>Notify</span>
             </Link>
           </div>
           

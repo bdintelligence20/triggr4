@@ -25,6 +25,7 @@ import DashboardView from './components/views/Dashboard';
 import HubDetails from './components/views/HubDetails';
 import Chat from './components/views/Chat';
 import Library from './components/views/Library';
+import Notify from './components/views/Notify';
 
 import './index.css';
 
@@ -52,6 +53,7 @@ const App: React.FC = () => {
                     <Route path="/hub" element={<HubDetails />} />
                     <Route path="/chat" element={<Chat />} />
                     <Route path="/library" element={<Library />} />
+                    <Route path="/notify" element={<Notify />} />
                   </Route>
                 </Route>
                 

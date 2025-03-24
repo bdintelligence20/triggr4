@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Bell } from 'lucide-react';
-import { Button } from '../../../ui/button';
+import { Button } from '../../../ui/Button';
 import NewAnnouncement from './NewAnnouncement';
 import BroadcastHistory from './BroadcastHistory';
 import ScheduledMessages from './ScheduledMessages';
