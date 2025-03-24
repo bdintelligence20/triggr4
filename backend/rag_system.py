@@ -339,7 +339,7 @@ class RAGSystem:
             source_id = doc.get('source_id', 'unknown')
             current_score = doc.get('score', 0)
             
-            if source_id not in deduplicated_sources or current_score > deduplicated_sources[source_id]['score']:
+            if source_id not in deduplicated_sources or current_score > deduplicated_sources[source_id].get('relevance_score', 0):
                 # Get document metadata from Firestore
                 try:
                     from firebase_admin import firestore
@@ -349,7 +349,8 @@ class RAGSystem:
                     
                     deduplicated_sources[source_id] = {
                         "id": source_id,
-                        "relevance_score": current_score,
+                        "score": current_score,
+                        "relevance_score": current_score,  # Keep both for compatibility
                         "document": {
                             "title": doc_data.get('title', 'Unknown Document'),
                             "file_type": doc_data.get('file_type', 'unknown'),
@@ -362,7 +363,8 @@ class RAGSystem:
                     # Fallback to basic source info if metadata fetch fails
                     deduplicated_sources[source_id] = {
                         "id": source_id,
-                        "relevance_score": current_score,
+                        "score": current_score,
+                        "relevance_score": current_score,  # Keep both for compatibility
                         "text": doc['text']  # Keep the text for context
                     }
         
