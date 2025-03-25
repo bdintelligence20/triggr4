@@ -2,6 +2,7 @@ import os
 import uuid
 import logging
 import re
+import json
 from flask import Blueprint, request, jsonify
 from firebase_admin import firestore
 from twilio.rest import Client
@@ -27,6 +28,9 @@ PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "knowledge-hub-vecto
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "+15055787929")
+
+# Approved Content Template SID for the AI answer (template body: "Hi! Here is your answer: {{1}}")
+TEMPLATE_CONTENT_SID = "HX6ed39c2507e07cb25c75412d74f134d8"
 
 # Initialize Twilio client
 try:
@@ -79,6 +83,35 @@ def send_whatsapp_message(to_number, message_body):
     except Exception as e:
         logger.error(f"Error sending WhatsApp message: {str(e)}")
         return create_twilio_response(message_body)
+
+def send_whatsapp_template_message(to_number, content_sid, content_variables):
+    """
+    Sends a templated WhatsApp message using Twilio's Content API.
+    
+    Parameters:
+      - to_number: Recipient's phone number.
+      - content_sid: The Content SID of the approved WhatsApp template.
+      - content_variables: A dict mapping template placeholders to dynamic values.
+    """
+    if not to_number.startswith('whatsapp:'):
+        to_number = f"whatsapp:{to_number}"
+    
+    from_number = TWILIO_WHATSAPP_FROM
+    if not from_number.startswith('whatsapp:'):
+        from_number = f"whatsapp:{from_number}"
+    
+    try:
+        message = twilio_client.messages.create(
+            content_sid=content_sid,
+            content_variables=json.dumps(content_variables),
+            from_=from_number,
+            to=to_number
+        )
+        logger.info(f"Templated message sent. SID: {message.sid}")
+        return create_twilio_response("")
+    except Exception as e:
+        logger.error(f"Error sending templated WhatsApp message: {str(e)}")
+        return create_twilio_response(f"Error: {str(e)}")
 
 def get_member_by_phone(phone_number):
     """Get member data by phone number."""
@@ -481,10 +514,12 @@ def whatsapp_webhook():
             # Send intermediate message
             send_whatsapp_message(from_number, "🔍 Found relevant information! Preparing your answer...")
             
-            # Send the complete answer
-            send_whatsapp_message(from_number, f"📋 {full_text}")
+            # --- Send the complete answer using the approved template ---
+            # This will use the approved template: "Hi! Here is your answer: {{1}}"
+            content_variables = {"1": full_text}
+            send_whatsapp_template_message(from_number, TEMPLATE_CONTENT_SID, content_variables)
             
-            # Send a completion message
+            # Send a completion message using freeform text
             send_whatsapp_message(from_number, "✅ That completes my answer. Let me know if you need any clarification!")
             
             # Store the complete response in Firestore
