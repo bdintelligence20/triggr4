@@ -336,7 +336,7 @@ def send_whatsapp_verification():
         # Get Twilio credentials
         twilio_account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
         twilio_auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
-        twilio_whatsapp_from = os.environ.get("TWILIO_WHATSAPP_FROM", "+14155238886")
+        twilio_whatsapp_from = os.environ.get("TWILIO_WHATSAPP_FROM", "+15055787929")
         
         if not all([twilio_account_sid, twilio_auth_token, twilio_whatsapp_from]):
             logger.warning("Twilio credentials not found. Skipping WhatsApp message.")

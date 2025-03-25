@@ -18,7 +18,7 @@ const WhatsAppIntegration: React.FC = () => {
   // Generate a WhatsApp number
   const generateWhatsappNumber = () => {
     // Use the fixed WhatsApp number since that's the only working one
-    const number = "+14155238886";
+    const number = "+15055787929";
     setWhatsappNumber(number);
     setShowShareOptions(true);
   
