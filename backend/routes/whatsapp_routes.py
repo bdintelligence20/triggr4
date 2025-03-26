@@ -132,8 +132,8 @@ def get_member_by_phone(phone_number):
     
     return member_data
 
-def get_or_create_verify_service(twilio_client, messaging_service_sid):
-    """Get existing Verify service or create a new one with WhatsApp capabilities."""
+def get_or_create_verify_service(twilio_client):
+    """Get existing Verify service or create a new one."""
     try:
         # Check if we already have a service SID in environment variables
         verify_service_sid = os.environ.get("TWILIO_VERIFY_SERVICE_SID")
@@ -141,15 +141,6 @@ def get_or_create_verify_service(twilio_client, messaging_service_sid):
             # Validate that the service exists
             try:
                 service = twilio_client.verify.v2.services(verify_service_sid).fetch()
-                
-                # Check if the service has the correct messaging service
-                if not hasattr(service, 'messaging_service_sid') or service.messaging_service_sid != messaging_service_sid:
-                    # Update the service with the messaging service SID
-                    service = twilio_client.verify.v2.services(verify_service_sid).update(
-                        messaging_service_sid=messaging_service_sid
-                    )
-                    logger.info(f"Updated Verify service {service.sid} with Messaging Service {messaging_service_sid}")
-                
                 logger.info(f"Using existing Verify service: {service.sid}")
                 return service.sid
             except Exception as e:
@@ -162,22 +153,14 @@ def get_or_create_verify_service(twilio_client, messaging_service_sid):
         # Look for a service named "Knowledge Hub Verification"
         for service in services:
             if service.friendly_name == "Knowledge Hub Verification":
-                # Update the service with the messaging service SID if needed
-                if not hasattr(service, 'messaging_service_sid') or service.messaging_service_sid != messaging_service_sid:
-                    service = twilio_client.verify.v2.services(service.sid).update(
-                        messaging_service_sid=messaging_service_sid
-                    )
-                    logger.info(f"Updated Verify service {service.sid} with Messaging Service {messaging_service_sid}")
-                
                 logger.info(f"Found existing Verify service: {service.sid}")
                 return service.sid
         
-        # If no service found, create a new one with the messaging service SID
+        # If no service found, create a new one
         service = twilio_client.verify.v2.services.create(
-            friendly_name="Knowledge Hub Verification",
-            messaging_service_sid=messaging_service_sid
+            friendly_name="Knowledge Hub Verification"
         )
-        logger.info(f"Created new Verify service: {service.sid} with Messaging Service {messaging_service_sid}")
+        logger.info(f"Created new Verify service: {service.sid}")
         
         return service.sid
     except Exception as e:
@@ -233,8 +216,8 @@ def handle_verification_code(from_number, message):
         # Initialize Twilio client
         twilio_client = Client(twilio_account_sid, twilio_auth_token)
         
-        # Get or create a Verify service with the Messaging Service SID
-        verify_service_sid = get_or_create_verify_service(twilio_client, twilio_messaging_service_sid)
+        # Get or create a Verify service
+        verify_service_sid = get_or_create_verify_service(twilio_client)
         
         # Check the verification code with Twilio Verify
         try:
