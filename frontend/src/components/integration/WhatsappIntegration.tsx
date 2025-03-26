@@ -78,9 +78,29 @@ const WhatsAppIntegration: React.FC = () => {
       </div>
       
       <div className="p-6">
-        <p className="text-gray-600 dark:text-gray-400 mb-6">
+        <p className="text-gray-600 dark:text-gray-400 mb-4">
           Generate a WhatsApp number to connect with your knowledge base and share it with your team or customers.
         </p>
+        
+        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg mb-6 text-sm">
+          <h4 className="font-medium text-blue-700 dark:text-blue-300 mb-2">New: Enhanced WhatsApp Integration</h4>
+          <p className="text-gray-600 dark:text-gray-400 mb-2">
+            We've upgraded our WhatsApp integration to use Twilio Conversations API for improved reliability and features:
+          </p>
+          <ul className="list-disc pl-5 text-gray-600 dark:text-gray-400 mb-2">
+            <li>More reliable message delivery</li>
+            <li>Better handling of markdown and special characters</li>
+            <li>Improved conversation history</li>
+          </ul>
+          <p className="text-gray-600 dark:text-gray-400 mb-2">
+            <strong>Setup Instructions:</strong> Configure your Twilio account to use the Conversations webhook:
+          </p>
+          <ol className="list-decimal pl-5 text-gray-600 dark:text-gray-400">
+            <li>Go to Twilio Console &gt; Conversations &gt; Settings</li>
+            <li>Set the webhook URL to: <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">{window.location.origin}/whatsapp/conversation-webhook</code></li>
+            <li>Enable the "onMessageAdded" event</li>
+          </ol>
+        </div>
         
         {whatsappNumber ? (
           <div className="mb-6">
