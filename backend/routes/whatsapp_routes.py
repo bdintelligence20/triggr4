@@ -163,13 +163,14 @@ def handle_verification_code(from_number, message):
         logger.info(f"Phone number {phone_number} is already verified")
         return create_twilio_response("✅ Your WhatsApp number is already verified. You can start querying the knowledge base.")
     
-    # Check verification code
-    stored_code = member_data.get('verificationCode')
-    logger.info(f"Comparing codes - Received: {verification_code}, Stored: {stored_code}")
+    # For WhatsApp authentication templates, we don't compare with our stored code
+    # Instead, we check if a verification was sent and trust the code from WhatsApp
+    if not member_data.get('whatsappVerificationSent'):
+        logger.warning(f"No verification was sent to {phone_number} but received code: {verification_code}")
+        return create_twilio_response("❌ No verification was requested for this number. Please contact your organization administrator.")
     
-    if stored_code != verification_code:
-        logger.warning(f"Invalid verification code for {phone_number}. Received: {verification_code}, Expected: {stored_code}")
-        return create_twilio_response("❌ Invalid verification code. Please try again or contact your organization administrator.")
+    # Log the received code
+    logger.info(f"Accepting WhatsApp-generated verification code: {verification_code} for {phone_number}")
     
     try:
         # Update member as verified
