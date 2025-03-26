@@ -1,6 +1,7 @@
 // contexts/AppContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { KnowledgeItem, Category, ChatMessage, API_URL } from '../types';
+import { useAuth } from './AuthContext';
 
 interface AppContextType {
   // UI States
@@ -64,6 +65,10 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  // Get auth context to access user and organization info
+  const { user } = useAuth();
+  const organizationId = user?.organizationId;
+  
   // UI States
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -81,6 +86,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     { id: 'all', name: 'All Items' },
     { id: 'hrhub', name: 'HR Hub' }
   ]);
+  
+  // Reset state when organization changes
+  useEffect(() => {
+    if (organizationId) {
+      // Clear existing data when organization changes
+      setKnowledgeItems([]);
+      setChatMessages([]);
+      console.log(`Organization changed to: ${organizationId}. State reset.`);
+    }
+  }, [organizationId]);
   
   // File Upload States
   const [isProcessingFile, setIsProcessingFile] = useState(false);
@@ -112,7 +127,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     
     checkBackendConnection();
-  }, []);
+  }, [organizationId]); // Re-check when organization changes
   
   // Clean up EventSource on unmount
   useEffect(() => {

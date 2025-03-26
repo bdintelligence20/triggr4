@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import useRoleStore from '../store/roleStore';
 import { API_URL } from '../types';
 import * as api from '../services/api';
+import { useAppContext } from './AppContext';
 
 interface User {
   id: string;
@@ -210,6 +211,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  // Get the app context to clear state on logout
+  const { 
+    setKnowledgeItems, 
+    setChatMessages, 
+    setCategories,
+    setActiveTab,
+    setSelectedCategory
+  } = useAppContext();
+
   const logout = async () => {
     try {
       // Call the logout API
@@ -217,11 +227,25 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch (err) {
       console.error('Logout failed:', err);
     } finally {
-      // Always clear local storage and state
+      // Clear all application state
       localStorage.removeItem('auth_token');
       localStorage.removeItem('auth_email');
+      
+      // Clear auth state
       setUser(null);
       setRole('guest');
+      
+      // Clear application data to prevent data leakage between organizations
+      setKnowledgeItems([]);
+      setChatMessages([]);
+      setCategories([
+        { id: 'all', name: 'All Items' },
+        { id: 'hrhub', name: 'HR Hub' }
+      ]);
+      setActiveTab('library');
+      setSelectedCategory('all');
+      
+      // Navigate to login page
       navigate('/login');
     }
   };

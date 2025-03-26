@@ -5,19 +5,41 @@ interface HubContextType {
   hubName: string;
   hubId: string;
   isAdmin: boolean;
+  organizationId: string | undefined;
 }
 
 const HubContext = createContext<HubContextType | undefined>(undefined);
 
 export const HubProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user } = useAuth();
+  const [hubData, setHubData] = useState<HubContextType>({
+    hubName: 'Knowledge Hub',
+    hubId: 'default',
+    isAdmin: false,
+    organizationId: undefined
+  });
   
-  // Use organization data as hub data
-  const hubData = {
-    hubName: user?.organizationName || 'Knowledge Hub',
-    hubId: user?.organizationId || 'default',
-    isAdmin: true // Always show admin features for now
-  };
+  // Update hub data when user or organization changes
+  useEffect(() => {
+    if (user) {
+      setHubData({
+        hubName: user.organizationName || 'Knowledge Hub',
+        hubId: user.organizationId || 'default',
+        isAdmin: user.organizationRole === 'admin',
+        organizationId: user.organizationId
+      });
+      
+      console.log(`Hub context updated for organization: ${user.organizationId}`);
+    } else {
+      // Reset to defaults when user logs out
+      setHubData({
+        hubName: 'Knowledge Hub',
+        hubId: 'default',
+        isAdmin: false,
+        organizationId: undefined
+      });
+    }
+  }, [user]);
   
   return <HubContext.Provider value={hubData}>{children}</HubContext.Provider>;
 };

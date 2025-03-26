@@ -1,6 +1,7 @@
 // hooks/useKnowledgeBase.tsx
 import { useEffect, useCallback, useRef } from 'react';
 import { useAppContext } from '../contexts/AppContext';
+import { useAuth } from '../contexts/AuthContext';
 import { API_URL, KnowledgeItem } from '../types';
 
 export const useKnowledgeBase = () => {
@@ -12,6 +13,10 @@ export const useKnowledgeBase = () => {
     searchQuery,
     knowledgeItems
   } = useAppContext();
+  
+  // Get user and organization info from auth context
+  const { user } = useAuth();
+  const organizationId = user?.organizationId;
   
   // Use a ref to track if documents are currently being loaded
   const isLoadingRef = useRef(false);
@@ -150,17 +155,20 @@ export const useKnowledgeBase = () => {
     }
   };
 
-  // Load documents only once on initial render
+  // Load documents when component mounts or organization changes
   useEffect(() => {
-    loadDocuments(true); // Force load on initial render
-    
-    // Set up a refresh interval (optional, every 30 seconds)
-    const intervalId = setInterval(() => {
-      loadDocuments();
-    }, 30000);
-    
-    return () => clearInterval(intervalId);
-  }, []); // Empty dependency array to ensure it only runs once
+    if (organizationId) {
+      console.log(`Loading documents for organization: ${organizationId}`);
+      loadDocuments(true); // Force load when organization changes
+      
+      // Set up a refresh interval (optional, every 30 seconds)
+      const intervalId = setInterval(() => {
+        loadDocuments();
+      }, 30000);
+      
+      return () => clearInterval(intervalId);
+    }
+  }, [organizationId]); // Reload when organization changes
 
   return {
     loadDocuments,

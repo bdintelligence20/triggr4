@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useAppContext } from './AppContext';
+import { useAuth } from './AuthContext';
 import { useChat as useExistingChat } from '../hooks/useChat';
 import { API_URL } from '../types';
 import * as api from '../services/api';
@@ -63,6 +64,10 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Get user and organization info from auth context
+  const { user } = useAuth();
+  const organizationId = user?.organizationId;
   
   const { 
     chatCategory, 
@@ -371,21 +376,32 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
   
-  // Load chat history on mount
+  // Load chat history when component mounts or organization changes
   useEffect(() => {
-    loadChatHistory();
-  }, []);
+    if (organizationId) {
+      console.log(`Loading chat history for organization: ${organizationId}`);
+      loadChatHistory();
+      
+      // Reset state when organization changes
+      return () => {
+        setThreads([]);
+        setActiveThreadState(null);
+        setMessages([]);
+        setChatHistory([]);
+      };
+    }
+  }, [organizationId]);
   
   // Auto-save chat session when messages change
   useEffect(() => {
-    if (chatMessages.length > 0 && activeThread) {
+    if (chatMessages.length > 0 && activeThread && organizationId) {
       const saveTimeout = setTimeout(() => {
         saveChatSession();
       }, 2000);
       
       return () => clearTimeout(saveTimeout);
     }
-  }, [chatMessages]);
+  }, [chatMessages, organizationId]);
   
   return (
     <ChatContext.Provider value={{

@@ -1,6 +1,7 @@
 // hooks/useChat.tsx
 import { useRef, useEffect } from 'react';
 import { useAppContext } from '../contexts/AppContext';
+import { useAuth } from '../contexts/AuthContext';
 import { API_URL, QueryResponse, ChatMessage } from '../types';
 
 // Approximate token counting function for client-side estimation
@@ -30,6 +31,10 @@ export const useChat = () => {
     setActiveEventSource
   } = useAppContext();
   
+  // Get user and organization info from auth context
+  const { user } = useAuth();
+  const organizationId = user?.organizationId;
+  
   // Build conversation history from the current chat messages with token management
   const buildConversationHistory = () => {
     // Start with the most recent messages and work backwards
@@ -56,7 +61,7 @@ export const useChat = () => {
   };
   
   const handleSendMessage = async () => {
-    if (!newMessage.trim()) return;
+    if (!newMessage.trim() || !organizationId) return;
     
     // Close any existing EventSource
     if (activeEventSource) {
