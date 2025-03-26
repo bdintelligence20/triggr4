@@ -3,7 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import useRoleStore from '../store/roleStore';
 import { API_URL } from '../types';
 import * as api from '../services/api';
-import { useAppContext } from './AppContext';
+
+// Define an event for state reset
+export const APP_EVENTS = {
+  LOGOUT: 'app_logout'
+};
 
 interface User {
   id: string;
@@ -211,15 +215,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // Get the app context to clear state on logout
-  const { 
-    setKnowledgeItems, 
-    setChatMessages, 
-    setCategories,
-    setActiveTab,
-    setSelectedCategory
-  } = useAppContext();
-
   const logout = async () => {
     try {
       // Call the logout API
@@ -235,15 +230,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUser(null);
       setRole('guest');
       
-      // Clear application data to prevent data leakage between organizations
-      setKnowledgeItems([]);
-      setChatMessages([]);
-      setCategories([
-        { id: 'all', name: 'All Items' },
-        { id: 'hrhub', name: 'HR Hub' }
-      ]);
-      setActiveTab('library');
-      setSelectedCategory('all');
+      // Dispatch an event to notify other contexts to reset their state
+      const logoutEvent = new CustomEvent(APP_EVENTS.LOGOUT);
+      window.dispatchEvent(logoutEvent);
       
       // Navigate to login page
       navigate('/login');

@@ -1,7 +1,7 @@
 // hooks/useChat.tsx
 import { useRef, useEffect } from 'react';
 import { useAppContext } from '../contexts/AppContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, APP_EVENTS } from '../contexts/AuthContext';
 import { API_URL, QueryResponse, ChatMessage } from '../types';
 
 // Approximate token counting function for client-side estimation
@@ -179,6 +179,29 @@ export const useChat = () => {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [chatMessages]);
+  
+  // Listen for logout events to reset state
+  useEffect(() => {
+    const handleLogout = () => {
+      // Close any active event source
+      if (activeEventSource) {
+        activeEventSource.close();
+        setActiveEventSource(null);
+      }
+      
+      // Clear message state
+      setNewMessage('');
+      console.log('Chat hook state reset due to logout event');
+    };
+    
+    // Add event listener
+    window.addEventListener(APP_EVENTS.LOGOUT, handleLogout);
+    
+    // Clean up
+    return () => {
+      window.removeEventListener(APP_EVENTS.LOGOUT, handleLogout);
+    };
+  }, [activeEventSource, setActiveEventSource, setNewMessage]);
   
   return {
     chatContainerRef,

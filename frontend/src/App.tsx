@@ -33,8 +33,8 @@ import './index.css';
 const App: React.FC = () => {
   return (
     <Router>
-      <AppProvider>
-        <AuthProvider>
+      <AuthProvider>
+        <AppProvider>
           <HubProvider>
             <ChatProvider>
               <Routes>
@@ -75,8 +75,8 @@ const App: React.FC = () => {
               </Routes>
             </ChatProvider>
           </HubProvider>
-        </AuthProvider>
-      </AppProvider>
+        </AppProvider>
+      </AuthProvider>
     </Router>
   );
 };

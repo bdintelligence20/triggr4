@@ -1,7 +1,7 @@
 // contexts/AppContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { KnowledgeItem, Category, ChatMessage, API_URL } from '../types';
-import { useAuth } from './AuthContext';
+import { useAuth, APP_EVENTS } from './AuthContext';
 
 interface AppContextType {
   // UI States
@@ -96,6 +96,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       console.log(`Organization changed to: ${organizationId}. State reset.`);
     }
   }, [organizationId]);
+  
+  // Listen for logout events to reset state
+  useEffect(() => {
+    const handleLogout = () => {
+      // Reset all state to defaults
+      setKnowledgeItems([]);
+      setChatMessages([]);
+      setCategories([
+        { id: 'all', name: 'All Items' },
+        { id: 'hrhub', name: 'HR Hub' }
+      ]);
+      setActiveTab('library');
+      setSelectedCategory('all');
+      console.log('App state reset due to logout event');
+    };
+    
+    // Add event listener
+    window.addEventListener(APP_EVENTS.LOGOUT, handleLogout);
+    
+    // Clean up
+    return () => {
+      window.removeEventListener(APP_EVENTS.LOGOUT, handleLogout);
+    };
+  }, []);
   
   // File Upload States
   const [isProcessingFile, setIsProcessingFile] = useState(false);

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useAuth } from './AuthContext';
+import { useAuth, APP_EVENTS } from './AuthContext';
 
 interface HubContextType {
   hubName: string;
@@ -40,6 +40,28 @@ export const HubProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
     }
   }, [user]);
+  
+  // Listen for logout events to reset state
+  useEffect(() => {
+    const handleLogout = () => {
+      // Reset hub data to defaults
+      setHubData({
+        hubName: 'Knowledge Hub',
+        hubId: 'default',
+        isAdmin: false,
+        organizationId: undefined
+      });
+      console.log('Hub state reset due to logout event');
+    };
+    
+    // Add event listener
+    window.addEventListener(APP_EVENTS.LOGOUT, handleLogout);
+    
+    // Clean up
+    return () => {
+      window.removeEventListener(APP_EVENTS.LOGOUT, handleLogout);
+    };
+  }, []);
   
   return <HubContext.Provider value={hubData}>{children}</HubContext.Provider>;
 };

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useAppContext } from './AppContext';
-import { useAuth } from './AuthContext';
+import { useAuth, APP_EVENTS } from './AuthContext';
 import { useChat as useExistingChat } from '../hooks/useChat';
 import { API_URL } from '../types';
 import * as api from '../services/api';
@@ -391,6 +391,26 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
   }, [organizationId]);
+  
+  // Listen for logout events to reset state
+  useEffect(() => {
+    const handleLogout = () => {
+      // Reset all chat state
+      setThreads([]);
+      setActiveThreadState(null);
+      setMessages([]);
+      setChatHistory([]);
+      console.log('Chat state reset due to logout event');
+    };
+    
+    // Add event listener
+    window.addEventListener(APP_EVENTS.LOGOUT, handleLogout);
+    
+    // Clean up
+    return () => {
+      window.removeEventListener(APP_EVENTS.LOGOUT, handleLogout);
+    };
+  }, []);
   
   // Auto-save chat session when messages change
   useEffect(() => {
