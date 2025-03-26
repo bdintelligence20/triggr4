@@ -279,6 +279,58 @@ def delete_member(member_id):
         logger.error(f"Error deleting member: {str(e)}")
         return jsonify({'error': f'Failed to delete member: {str(e)}'}), 500
 
+def get_or_create_verify_service(twilio_client, messaging_service_sid):
+    """Get existing Verify service or create a new one with WhatsApp capabilities."""
+    try:
+        # Check if we already have a service SID in environment variables
+        verify_service_sid = os.environ.get("TWILIO_VERIFY_SERVICE_SID")
+        if verify_service_sid:
+            # Validate that the service exists
+            try:
+                service = twilio_client.verify.v2.services(verify_service_sid).fetch()
+                
+                # Check if the service has the correct messaging service
+                if not hasattr(service, 'messaging_service_sid') or service.messaging_service_sid != messaging_service_sid:
+                    # Update the service with the messaging service SID
+                    service = twilio_client.verify.v2.services(verify_service_sid).update(
+                        messaging_service_sid=messaging_service_sid
+                    )
+                    logger.info(f"Updated Verify service {service.sid} with Messaging Service {messaging_service_sid}")
+                
+                logger.info(f"Using existing Verify service: {service.sid}")
+                return service.sid
+            except Exception as e:
+                logger.warning(f"Stored Verify service SID is invalid: {str(e)}")
+                # Continue to create a new one
+        
+        # Try to fetch existing services
+        services = twilio_client.verify.v2.services.list(limit=20)
+        
+        # Look for a service named "Knowledge Hub Verification"
+        for service in services:
+            if service.friendly_name == "Knowledge Hub Verification":
+                # Update the service with the messaging service SID if needed
+                if not hasattr(service, 'messaging_service_sid') or service.messaging_service_sid != messaging_service_sid:
+                    service = twilio_client.verify.v2.services(service.sid).update(
+                        messaging_service_sid=messaging_service_sid
+                    )
+                    logger.info(f"Updated Verify service {service.sid} with Messaging Service {messaging_service_sid}")
+                
+                logger.info(f"Found existing Verify service: {service.sid}")
+                return service.sid
+        
+        # If no service found, create a new one with the messaging service SID
+        service = twilio_client.verify.v2.services.create(
+            friendly_name="Knowledge Hub Verification",
+            messaging_service_sid=messaging_service_sid
+        )
+        logger.info(f"Created new Verify service: {service.sid} with Messaging Service {messaging_service_sid}")
+        
+        return service.sid
+    except Exception as e:
+        logger.error(f"Error creating/updating Verify service: {str(e)}")
+        raise
+
 # Send WhatsApp verification to a member
 @member_bp.route('/send-verification', methods=['POST'])
 def send_whatsapp_verification():
@@ -323,42 +375,28 @@ def send_whatsapp_verification():
         if member_data.get('organizationId') != organization_id:
             return jsonify({'error': 'Unauthorized to verify this member'}), 403
         
-        # Generate a verification code
-        verification_code = str(uuid.uuid4())[:6].upper()
-        
-        # Store the verification code in Firestore
-        members_ref.document(member_id).update({
-            'verificationCode': verification_code,
-            'verificationCodeExpiry': firestore.SERVER_TIMESTAMP,
-            'updatedAt': firestore.SERVER_TIMESTAMP,
-            'updatedBy': user_query[0].id
-        })
-        
         # Get Twilio credentials
         twilio_account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
         twilio_auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
-        twilio_whatsapp_from = os.environ.get("TWILIO_WHATSAPP_FROM", "+15055787929")
         twilio_messaging_service_sid = os.environ.get("TWILIO_MESSAGING_SERVICE_SID")
         
-        if not all([twilio_account_sid, twilio_auth_token]):
-            logger.warning("Twilio credentials not found. Skipping WhatsApp message.")
-            logger.info(f"Verification code for member {member_id}: {verification_code}")
-            return jsonify({'memberId': member_id}), 200
+        if not all([twilio_account_sid, twilio_auth_token, twilio_messaging_service_sid]):
+            logger.warning("Twilio credentials or Messaging Service SID not found.")
+            return jsonify({'error': 'Twilio credentials not fully configured'}), 500
         
         try:
             # Initialize Twilio client
             from twilio.rest import Client
             twilio_client = Client(twilio_account_sid, twilio_auth_token)
             
-            # Format the phone number
-            to_number = member_data.get('phone')
-            if not to_number.startswith('whatsapp:'):
-                to_number = f"whatsapp:{to_number}"
+            # Get or create a Verify service with the Messaging Service SID
+            verify_service_sid = get_or_create_verify_service(twilio_client, twilio_messaging_service_sid)
             
-            # Format the sender number
-            from_number = twilio_whatsapp_from
-            if not from_number.startswith('whatsapp:'):
-                from_number = f"whatsapp:{from_number}"
+            # Format the phone number (must be E.164 format without the whatsapp: prefix)
+            to_number = member_data.get('phone')
+            # Remove whatsapp: prefix if present
+            if to_number.startswith('whatsapp:'):
+                to_number = to_number[9:]
             
             # Get organization name
             org_name = "Knowledge Hub"
@@ -367,36 +405,37 @@ def send_whatsapp_verification():
                 org_data = org_doc.to_dict()
                 org_name = org_data.get('name', org_name)
             
-            # Send the verification template message
-            # For authentication templates, we don't pass the code as a variable
-            # The code is generated and inserted by the WhatsApp Business API
+            # Send verification via WhatsApp using Verify API
             try:
-                # Use the authentication template without content variables
-                message = twilio_client.messages.create(
-                    content_sid="HXb15ad263eec123a7d5adc9c78670ce5d",
-                    messaging_service_sid=twilio_messaging_service_sid,
-                    to=to_number
+                verification = twilio_client.verify.v2.services(verify_service_sid).verifications.create(
+                    to=to_number,
+                    channel="whatsapp"
                 )
-                logger.info(f"WhatsApp verification template message sent to {to_number}")
                 
-                # Store the fact that we've sent a verification request
-                # The actual code will be generated by WhatsApp/Twilio
+                logger.info(f"WhatsApp verification sent to {to_number}, verification SID: {verification.sid}")
+                
+                # Store verification information in Firestore
                 members_ref.document(member_id).update({
                     'whatsappVerificationSent': True,
-                    'whatsappVerificationSentAt': firestore.SERVER_TIMESTAMP
+                    'whatsappVerificationSentAt': firestore.SERVER_TIMESTAMP,
+                    'verificationSid': verification.sid,
+                    'updatedAt': firestore.SERVER_TIMESTAMP,
+                    'updatedBy': user_query[0].id
                 })
+                
+                return jsonify({
+                    'memberId': member_id,
+                    'status': 'verification_sent',
+                    'verificationSid': verification.sid
+                }), 200
                 
             except Exception as e:
                 logger.error(f"Error sending WhatsApp verification: {str(e)}")
-                # We can't fall back to plain text for authentication
-                # as WhatsApp requires approved templates for verification
+                return jsonify({'error': f'Failed to send verification: {str(e)}'}), 500
             
         except Exception as e:
-            logger.error(f"Error sending WhatsApp message: {str(e)}")
-            # Continue even if WhatsApp message fails
-            # The verification code is still stored in Firestore
-        
-        return jsonify({'memberId': member_id}), 200
+            logger.error(f"Error initializing Twilio client: {str(e)}")
+            return jsonify({'error': f'Failed to initialize Twilio client: {str(e)}'}), 500
         
     except Exception as e:
         logger.error(f"Error sending verification: {str(e)}")

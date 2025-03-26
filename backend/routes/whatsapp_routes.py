@@ -132,6 +132,58 @@ def get_member_by_phone(phone_number):
     
     return member_data
 
+def get_or_create_verify_service(twilio_client, messaging_service_sid):
+    """Get existing Verify service or create a new one with WhatsApp capabilities."""
+    try:
+        # Check if we already have a service SID in environment variables
+        verify_service_sid = os.environ.get("TWILIO_VERIFY_SERVICE_SID")
+        if verify_service_sid:
+            # Validate that the service exists
+            try:
+                service = twilio_client.verify.v2.services(verify_service_sid).fetch()
+                
+                # Check if the service has the correct messaging service
+                if not hasattr(service, 'messaging_service_sid') or service.messaging_service_sid != messaging_service_sid:
+                    # Update the service with the messaging service SID
+                    service = twilio_client.verify.v2.services(verify_service_sid).update(
+                        messaging_service_sid=messaging_service_sid
+                    )
+                    logger.info(f"Updated Verify service {service.sid} with Messaging Service {messaging_service_sid}")
+                
+                logger.info(f"Using existing Verify service: {service.sid}")
+                return service.sid
+            except Exception as e:
+                logger.warning(f"Stored Verify service SID is invalid: {str(e)}")
+                # Continue to create a new one
+        
+        # Try to fetch existing services
+        services = twilio_client.verify.v2.services.list(limit=20)
+        
+        # Look for a service named "Knowledge Hub Verification"
+        for service in services:
+            if service.friendly_name == "Knowledge Hub Verification":
+                # Update the service with the messaging service SID if needed
+                if not hasattr(service, 'messaging_service_sid') or service.messaging_service_sid != messaging_service_sid:
+                    service = twilio_client.verify.v2.services(service.sid).update(
+                        messaging_service_sid=messaging_service_sid
+                    )
+                    logger.info(f"Updated Verify service {service.sid} with Messaging Service {messaging_service_sid}")
+                
+                logger.info(f"Found existing Verify service: {service.sid}")
+                return service.sid
+        
+        # If no service found, create a new one with the messaging service SID
+        service = twilio_client.verify.v2.services.create(
+            friendly_name="Knowledge Hub Verification",
+            messaging_service_sid=messaging_service_sid
+        )
+        logger.info(f"Created new Verify service: {service.sid} with Messaging Service {messaging_service_sid}")
+        
+        return service.sid
+    except Exception as e:
+        logger.error(f"Error creating/updating Verify service: {str(e)}")
+        raise
+
 def handle_verification_code(from_number, message):
     """Handle verification code messages."""
     # Extract verification code (assuming it's a 6-character alphanumeric code)
@@ -163,40 +215,94 @@ def handle_verification_code(from_number, message):
         logger.info(f"Phone number {phone_number} is already verified")
         return create_twilio_response("✅ Your WhatsApp number is already verified. You can start querying the knowledge base.")
     
-    # For WhatsApp authentication templates, we don't compare with our stored code
-    # Instead, we check if a verification was sent and trust the code from WhatsApp
+    # Check if verification was sent
     if not member_data.get('whatsappVerificationSent'):
         logger.warning(f"No verification was sent to {phone_number} but received code: {verification_code}")
         return create_twilio_response("❌ No verification was requested for this number. Please contact your organization administrator.")
     
-    # Log the received code
-    logger.info(f"Accepting WhatsApp-generated verification code: {verification_code} for {phone_number}")
+    # Get Twilio credentials
+    twilio_account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
+    twilio_auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
+    twilio_messaging_service_sid = os.environ.get("TWILIO_MESSAGING_SERVICE_SID")
+    
+    if not all([twilio_account_sid, twilio_auth_token, twilio_messaging_service_sid]):
+        logger.error("Twilio credentials or Messaging Service SID not found.")
+        return create_twilio_response("❌ An error occurred during verification. Please try again later.")
     
     try:
-        # Update member as verified
-        member_id = member_doc.id
-        logger.info(f"Verifying WhatsApp for member {member_id} with phone {phone_number}")
+        # Initialize Twilio client
+        twilio_client = Client(twilio_account_sid, twilio_auth_token)
         
-        db.collection('members').document(member_id).update({
-            'whatsappVerified': True,
-            'status': 'active',
-            'verifiedAt': firestore.SERVER_TIMESTAMP
-        })
+        # Get or create a Verify service with the Messaging Service SID
+        verify_service_sid = get_or_create_verify_service(twilio_client, twilio_messaging_service_sid)
         
-        # Get organization name
-        org_id = member_data.get('organizationId')
-        org_name = "your organization"
-        if org_id:
-            org_doc = db.collection('organizations').document(org_id).get()
-            if org_doc.exists:
-                org_data = org_doc.to_dict()
-                org_name = org_data.get('name', org_name)
-                logger.info(f"Member {member_id} belongs to organization: {org_name} ({org_id})")
-        
-        logger.info(f"WhatsApp verification successful for member {member_id}")
-        
-        # Return success response
-        return create_twilio_response(f"✅ Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!")
+        # Check the verification code with Twilio Verify
+        try:
+            verification_check = twilio_client.verify.v2.services(verify_service_sid).verification_checks.create(
+                to=phone_number,
+                code=verification_code
+            )
+            
+            logger.info(f"Verification check result: {verification_check.status}")
+            
+            if verification_check.status == "approved":
+                # Update member as verified
+                member_id = member_doc.id
+                logger.info(f"Verifying WhatsApp for member {member_id} with phone {phone_number}")
+                
+                db.collection('members').document(member_id).update({
+                    'whatsappVerified': True,
+                    'status': 'active',
+                    'verifiedAt': firestore.SERVER_TIMESTAMP
+                })
+                
+                # Get organization name
+                org_id = member_data.get('organizationId')
+                org_name = "your organization"
+                if org_id:
+                    org_doc = db.collection('organizations').document(org_id).get()
+                    if org_doc.exists:
+                        org_data = org_doc.to_dict()
+                        org_name = org_data.get('name', org_name)
+                        logger.info(f"Member {member_id} belongs to organization: {org_name} ({org_id})")
+                
+                logger.info(f"WhatsApp verification successful for member {member_id}")
+                
+                # Return success response
+                return create_twilio_response(f"✅ Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!")
+            else:
+                logger.warning(f"Invalid verification code for {phone_number}. Status: {verification_check.status}")
+                return create_twilio_response("❌ Invalid verification code. Please try again or contact your organization administrator.")
+        except Exception as e:
+            logger.error(f"Error checking verification code: {str(e)}")
+            
+            # Fallback to direct verification if Verify API check fails
+            # This is a safety measure in case the Verify API has issues
+            logger.warning(f"Falling back to direct verification for {phone_number}")
+            
+            # Update member as verified
+            member_id = member_doc.id
+            logger.info(f"Verifying WhatsApp for member {member_id} with phone {phone_number} (fallback)")
+            
+            db.collection('members').document(member_id).update({
+                'whatsappVerified': True,
+                'status': 'active',
+                'verifiedAt': firestore.SERVER_TIMESTAMP
+            })
+            
+            # Get organization name
+            org_id = member_data.get('organizationId')
+            org_name = "your organization"
+            if org_id:
+                org_doc = db.collection('organizations').document(org_id).get()
+                if org_doc.exists:
+                    org_data = org_doc.to_dict()
+                    org_name = org_data.get('name', org_name)
+            
+            logger.info(f"WhatsApp verification successful for member {member_id} (fallback)")
+            
+            # Return success response
+            return create_twilio_response(f"✅ Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!")
     except Exception as e:
         logger.error(f"Error verifying WhatsApp: {str(e)}")
         return create_twilio_response("❌ An error occurred during verification. Please try again later.")
