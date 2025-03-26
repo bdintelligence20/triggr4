@@ -28,6 +28,7 @@ PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "knowledge-hub-vecto
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "+15055787929")
+TWILIO_MESSAGING_SERVICE_SID = os.environ.get("TWILIO_MESSAGING_SERVICE_SID")
 
 # Approved Content Template SID for the AI answer (template body: "Hi! Here is your answer: {{1}}")
 TEMPLATE_CONTENT_SID = "HX6ed39c2507e07cb25c75412d74f134d8"  # Template name: copy_ai_response
@@ -57,11 +58,6 @@ def send_whatsapp_message(to_number, message_body):
     if not to_number.startswith('whatsapp:'):
         to_number = f"whatsapp:{to_number}"
     
-    # Format the sender number.
-    from_number = TWILIO_WHATSAPP_FROM
-    if not from_number.startswith('whatsapp:'):
-        from_number = f"whatsapp:{from_number}"
-    
     try:
         # Split the message semantically if it exceeds the max_length.
         if len(message_body) > max_length:
@@ -69,13 +65,13 @@ def send_whatsapp_message(to_number, message_body):
             for chunk in chunks:
                 twilio_client.messages.create(
                     body=chunk,
-                    from_=from_number,
+                    messaging_service_sid=TWILIO_MESSAGING_SERVICE_SID,
                     to=to_number
                 )
         else:
             twilio_client.messages.create(
                 body=message_body,
-                from_=from_number,
+                messaging_service_sid=TWILIO_MESSAGING_SERVICE_SID,
                 to=to_number
             )
         return create_twilio_response("")
@@ -96,22 +92,19 @@ def send_whatsapp_template_message(to_number, content_sid, content_variables):
     if not to_number.startswith('whatsapp:'):
         to_number = f"whatsapp:{to_number}"
     
-    from_number = TWILIO_WHATSAPP_FROM
-    if not from_number.startswith('whatsapp:'):
-        from_number = f"whatsapp:{from_number}"
-    
     try:
+        # Try using the template with messaging service
         message = twilio_client.messages.create(
             content_sid=content_sid,
             content_variables=json.dumps(content_variables),
-            from_=from_number,
+            messaging_service_sid=TWILIO_MESSAGING_SERVICE_SID,
             to=to_number
         )
         logger.info(f"Templated message sent. Template SID: {content_sid}, Message SID: {message.sid}")
         return create_twilio_response("")
     except Exception as e:
         error_message = str(e)
-        if "content_sid" in error_message.lower():
+        if "content_sid" in error_message.lower() or "template" in error_message.lower():
             logger.error(f"Template error with SID {content_sid}: {error_message}")
             # Fall back to plain text message if template fails
             logger.info(f"Falling back to plain text message")

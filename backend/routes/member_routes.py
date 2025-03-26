@@ -338,8 +338,9 @@ def send_whatsapp_verification():
         twilio_account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
         twilio_auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
         twilio_whatsapp_from = os.environ.get("TWILIO_WHATSAPP_FROM", "+15055787929")
+        twilio_messaging_service_sid = os.environ.get("TWILIO_MESSAGING_SERVICE_SID")
         
-        if not all([twilio_account_sid, twilio_auth_token, twilio_whatsapp_from]):
+        if not all([twilio_account_sid, twilio_auth_token]):
             logger.warning("Twilio credentials not found. Skipping WhatsApp message.")
             logger.info(f"Verification code for member {member_id}: {verification_code}")
             return jsonify({'memberId': member_id}), 200
@@ -368,14 +369,32 @@ def send_whatsapp_verification():
             
             # Send the verification template message
             content_variables = {"1": verification_code}
-            message = twilio_client.messages.create(
-                content_sid="HXb15ad263eec123a7d5adc9c78670ce5d",
-                content_variables=json.dumps(content_variables),
-                from_=from_number,
-                to=to_number
-            )
-            
-            logger.info(f"WhatsApp verification message sent to {to_number}")
+            try:
+                # Try using the template with messaging service
+                message = twilio_client.messages.create(
+                    content_sid="HXb15ad263eec123a7d5adc9c78670ce5d",
+                    content_variables=json.dumps(content_variables),
+                    messaging_service_sid=twilio_messaging_service_sid,
+                    to=to_number
+                )
+                logger.info(f"WhatsApp verification template message sent to {to_number}")
+            except Exception as e:
+                # Fallback to plain text if template fails
+                logger.warning(f"Template error: {str(e)}. Falling back to plain text.")
+                message_body = f"""
+*Welcome to {org_name}!*
+
+Your verification code is: *{verification_code}*
+
+Please reply with this code to verify your WhatsApp number and gain access to our knowledge base.
+                """
+                
+                message = twilio_client.messages.create(
+                    body=message_body,
+                    messaging_service_sid=twilio_messaging_service_sid,
+                    to=to_number
+                )
+                logger.info(f"WhatsApp verification plain text message sent to {to_number}")
             
         except Exception as e:
             logger.error(f"Error sending WhatsApp message: {str(e)}")
