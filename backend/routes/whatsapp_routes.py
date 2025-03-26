@@ -30,7 +30,7 @@ TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "+15055787929")
 
 # Approved Content Template SID for the AI answer (template body: "Hi! Here is your answer: {{1}}")
-TEMPLATE_CONTENT_SID = "HX6ed39c2507e07cb25c75412d74f134d8"
+TEMPLATE_CONTENT_SID = "HX6ed39c2507e07cb25c75412d74f134d8"  # Template name: copy_ai_response
 
 # Initialize Twilio client
 try:
@@ -107,11 +107,18 @@ def send_whatsapp_template_message(to_number, content_sid, content_variables):
             from_=from_number,
             to=to_number
         )
-        logger.info(f"Templated message sent. SID: {message.sid}")
+        logger.info(f"Templated message sent. Template SID: {content_sid}, Message SID: {message.sid}")
         return create_twilio_response("")
     except Exception as e:
-        logger.error(f"Error sending templated WhatsApp message: {str(e)}")
-        return create_twilio_response(f"Error: {str(e)}")
+        error_message = str(e)
+        if "content_sid" in error_message.lower():
+            logger.error(f"Template error with SID {content_sid}: {error_message}")
+            # Fall back to plain text message if template fails
+            logger.info(f"Falling back to plain text message")
+            return send_whatsapp_message(to_number, content_variables.get("1", ""))
+        else:
+            logger.error(f"Error sending templated WhatsApp message: {error_message}")
+            return create_twilio_response(f"Error: {error_message}")
 
 def get_member_by_phone(phone_number):
     """Get member data by phone number."""
@@ -137,9 +144,11 @@ def handle_verification_code(from_number, message):
     # Extract verification code (assuming it's a 6-character alphanumeric code)
     code_match = re.search(r'\b([A-Z0-9]{6})\b', message.upper())
     if not code_match:
+        logger.info(f"No verification code found in message: '{message}'")
         return None
     
     verification_code = code_match.group(1)
+    logger.info(f"Verification code extracted: {verification_code}")
     
     # Clean the phone number (remove whatsapp: prefix if present)
     phone_number = from_number
@@ -158,15 +167,23 @@ def handle_verification_code(from_number, message):
     
     # Check if already verified
     if member_data.get('whatsappVerified'):
+        logger.info(f"Phone number {phone_number} is already verified")
         return create_twilio_response("✅ Your WhatsApp number is already verified. You can start querying the knowledge base.")
     
     # Check verification code
-    if member_data.get('verificationCode') != verification_code:
+    stored_code = member_data.get('verificationCode')
+    logger.info(f"Comparing codes - Received: {verification_code}, Stored: {stored_code}")
+    
+    if stored_code != verification_code:
+        logger.warning(f"Invalid verification code for {phone_number}. Received: {verification_code}, Expected: {stored_code}")
         return create_twilio_response("❌ Invalid verification code. Please try again or contact your organization administrator.")
     
     try:
         # Update member as verified
-        db.collection('members').document(member_doc.id).update({
+        member_id = member_doc.id
+        logger.info(f"Verifying WhatsApp for member {member_id} with phone {phone_number}")
+        
+        db.collection('members').document(member_id).update({
             'whatsappVerified': True,
             'status': 'active',
             'verifiedAt': firestore.SERVER_TIMESTAMP
@@ -180,6 +197,9 @@ def handle_verification_code(from_number, message):
             if org_doc.exists:
                 org_data = org_doc.to_dict()
                 org_name = org_data.get('name', org_name)
+                logger.info(f"Member {member_id} belongs to organization: {org_name} ({org_id})")
+        
+        logger.info(f"WhatsApp verification successful for member {member_id}")
         
         # Return success response
         return create_twilio_response(f"✅ Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!")
@@ -448,6 +468,7 @@ def whatsapp_webhook():
         try:
             try:
                 # Initialize custom RAG system with organization ID
+                logger.info(f"Initializing RAG system for organization: {organization_id}")
                 whatsapp_rag = RAGSystem(
                     openai_api_key=OPENAI_API_KEY,
                     anthropic_api_key=ANTHROPIC_API_KEY,
@@ -455,6 +476,7 @@ def whatsapp_webhook():
                     index_name=PINECONE_INDEX_NAME,
                     organization_id=organization_id  # Pass organization ID to filter results
                 )
+                logger.info(f"RAG system initialized with organization filter: {organization_id}")
                 
                 # Get previous conversation history for this member if available
                 conversation_history = ""
@@ -506,10 +528,16 @@ def whatsapp_webhook():
             full_text = ''.join(accumulated_text) if accumulated_text else result.get("answer", "")
             
             if not full_text:
+                logger.warning(f"No relevant information found for query: '{incoming_msg}' from organization: {organization_id}")
                 return send_whatsapp_message(
                     from_number, 
                     "📚 I couldn't find any relevant information in our knowledge base. Please try asking a different question."
                 )
+            
+            # Log sources if available
+            if result and "sources" in result:
+                source_ids = [source.get('id', 'unknown') for source in result.get("sources", [])]
+                logger.info(f"Found {len(source_ids)} sources for query: '{incoming_msg}'. Sources: {source_ids}")
             
             # Send intermediate message
             send_whatsapp_message(from_number, "🔍 Found relevant information! Preparing your answer...")
@@ -517,6 +545,7 @@ def whatsapp_webhook():
             # --- Send the complete answer using the approved template ---
             # This will use the approved template: "Hi! Here is your answer: {{1}}"
             content_variables = {"1": full_text}
+            logger.info(f"Sending response using template SID: {TEMPLATE_CONTENT_SID}")
             send_whatsapp_template_message(from_number, TEMPLATE_CONTENT_SID, content_variables)
             
             # Send a completion message using freeform text

@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 from flask import Blueprint, request, jsonify
 from firebase_admin import firestore
 import uuid
@@ -365,18 +366,11 @@ def send_whatsapp_verification():
                 org_data = org_doc.to_dict()
                 org_name = org_data.get('name', org_name)
             
-            # Prepare the message
-            message_body = f"""
-*Welcome to {org_name}!*
-
-Your verification code is: *{verification_code}*
-
-Please reply with this code to verify your WhatsApp number and gain access to our knowledge base.
-            """
-            
-            # Send the message
-            twilio_client.messages.create(
-                body=message_body,
+            # Send the verification template message
+            content_variables = {"1": verification_code}
+            message = twilio_client.messages.create(
+                content_sid="HXb15ad263eec123a7d5adc9c78670ce5d",
+                content_variables=json.dumps(content_variables),
                 from_=from_number,
                 to=to_number
             )
