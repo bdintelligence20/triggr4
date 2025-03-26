@@ -223,7 +223,8 @@ def handle_verification_code(from_number, message):
         try:
             verification_check = twilio_client.verify.v2.services(verify_service_sid).verification_checks.create(
                 to=phone_number,
-                code=verification_code
+                code=verification_code,
+                locale="en"  # Specify locale to ensure proper template selection
             )
             
             logger.info(f"Verification check result: {verification_check.status}")

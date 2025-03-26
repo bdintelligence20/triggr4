@@ -390,9 +390,11 @@ def send_whatsapp_verification():
             
             # Send verification via WhatsApp using Verify API
             try:
+                # Explicitly specify the channel as "whatsapp"
                 verification = twilio_client.verify.v2.services(verify_service_sid).verifications.create(
                     to=to_number,
-                    channel="whatsapp"
+                    channel="whatsapp",
+                    locale="en"  # Specify locale to ensure proper template selection
                 )
                 
                 logger.info(f"WhatsApp verification sent to {to_number}, verification SID: {verification.sid}")
