@@ -6,7 +6,7 @@ backlog = 2048
 
 # Worker processes
 workers = 2  # Increased from 1 to 2 for better concurrency
-worker_class = 'gevent'  # Changed from 'sync' to 'gevent' for async processing
+worker_class = 'sync'  # Reverted to 'sync' to avoid gevent monkey patching issues
 worker_connections = 1000
 timeout = 120
 keepalive = 2
