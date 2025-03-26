@@ -1,10 +1,13 @@
 import os
 import logging
 import traceback
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from firebase_admin import firestore
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from rag_system import RAGSystem
 import utils
+import requests
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -15,6 +18,23 @@ query_bp = Blueprint('query', __name__)
 # Get database instance
 db = firestore.client()
 
+# Define a custom key function for organization-aware rate limiting
+def get_tenant_limit_key():
+    # Get organization ID from the authenticated user
+    organization_id = utils.get_user_organization_id()
+    # Fallback to IP address if organization ID is not available
+    if not organization_id:
+        return get_remote_address()
+    # Combine organization ID with IP for more granular control
+    return f"{organization_id}:{request.remote_addr}"
+
+# Initialize limiter for this blueprint with organization-aware key function
+limiter = Limiter(
+    key_func=get_tenant_limit_key,
+    default_limits=["150 per day", "30 per hour"],
+    storage_uri="memory://"
+)
+
 # Get environment variables
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
@@ -22,6 +42,7 @@ PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "knowledge-hub-vectors")
 
 @query_bp.route('/query', methods=['POST'])
+@limiter.limit("10 per minute")  # Stricter limit for the query endpoint
 def query():
     """Query the knowledge base using custom RAG system."""
     data = request.get_json()
@@ -276,6 +297,7 @@ def get_chat_session(session_id):
         return jsonify({"error": f"Failed to retrieve chat session: {str(e)}"}), 500
 
 @query_bp.route('/evaluate', methods=['POST'])
+@limiter.limit("5 per minute")  # Strict limit for the evaluation endpoint
 def evaluate_rag():
     """Evaluate RAG system performance."""
     try:

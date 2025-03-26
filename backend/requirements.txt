@@ -29,6 +29,7 @@ cohere
 Flask[async]
 flask-cors
 flask-limiter
+flask-compress
 gunicorn
 
 # Async Support
@@ -61,3 +62,5 @@ werkzeug
 typing-extensions
 python-dotenv
 requests
+
+gevent

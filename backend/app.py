@@ -1,10 +1,14 @@
 import os
 import logging
 import nltk
-from flask import Flask
+from flask import Flask, request
 from flask_cors import CORS
+from flask_compress import Compress
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import base64
 import json
+import utils
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -81,11 +85,40 @@ bucket = gcs_client.bucket(GCS_BUCKET_NAME)
 # -------------------------------
 def create_app():
     app = Flask(__name__)
+    
+    # Initialize CORS
     CORS(app, origins=["*"], supports_credentials=True, methods=["GET", "POST", "OPTIONS", "DELETE", "PUT"])
+    
+    # Initialize Compress for response compression
+    compress = Compress()
+    compress.init_app(app)
+    
+    # Define a custom key function for organization-aware rate limiting
+    def get_tenant_limit_key():
+        # Get organization ID from the authenticated user
+        organization_id = utils.get_user_organization_id()
+        # Fallback to IP address if organization ID is not available
+        if not organization_id:
+            return get_remote_address()
+        # Combine organization ID with IP for more granular control
+        return f"{organization_id}:{request.remote_addr}"
+    
+    # Initialize rate limiter with organization-aware key function
+    limiter = Limiter(
+        key_func=get_tenant_limit_key,
+        app=app,
+        default_limits=["300 per day", "60 per hour"],
+        storage_uri="memory://",
+    )
+    
+    # Configure file uploads
     app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
     app.config['ALLOWED_EXTENSIONS'] = {'pdf', 'doc', 'docx', 'txt'}
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    
+    # Configure timeouts for external API calls
+    app.config['EXTERNAL_API_TIMEOUT'] = 30  # 30 seconds timeout for external API calls
 
     # Register blueprints
     from routes.auth_routes import auth_bp

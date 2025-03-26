@@ -65,7 +65,8 @@ export const useFileUpload = () => {
         
         // Determine file type
         const fileType = fileName.toLowerCase().endsWith('.pdf') ? 'pdf' : 
-                        (fileName.toLowerCase().endsWith('.doc') || fileName.toLowerCase().endsWith('.docx')) ? 'doc' : 'text';
+                        (fileName.toLowerCase().endsWith('.doc') || fileName.toLowerCase().endsWith('.docx')) ? 'doc' :
+                        fileName.toLowerCase().endsWith('.csv') ? 'csv' : 'text';
         
         // Create new knowledge item
         const newItem = {

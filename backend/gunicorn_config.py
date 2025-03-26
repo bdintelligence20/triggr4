@@ -5,11 +5,21 @@ bind = "0.0.0.0:10000"
 backlog = 2048
 
 # Worker processes
-workers = 1  # Single worker to avoid memory issues
-worker_class = 'sync'
+workers = 2  # Increased from 1 to 2 for better concurrency
+worker_class = 'gevent'  # Changed from 'sync' to 'gevent' for async processing
 worker_connections = 1000
 timeout = 120
 keepalive = 2
+
+# Memory management
+max_requests = 1000  # Recycle workers after 1000 requests
+max_requests_jitter = 200  # Add randomness to recycling
+limit_request_line = 4096
+limit_request_fields = 100
+limit_request_field_size = 8190
+
+# Preload application
+preload_app = True  # Load app code before forking workers
 
 # Server mechanics
 daemon = False

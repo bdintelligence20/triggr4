@@ -59,7 +59,9 @@ export const useKnowledgeBase = () => {
           title: doc.title,
           category: (doc.category === 'general' || doc.category === 'documents') ? 'hrhub' : doc.category,
           createdAt: new Date(doc.created_at || Date.now()),
-          type: doc.file_type === 'pdf' ? 'pdf' : doc.file_type === 'doc' ? 'doc' : 'text',
+          type: doc.file_type === 'pdf' ? 'pdf' : 
+                doc.file_type === 'doc' ? 'doc' : 
+                doc.file_type === 'csv' ? 'csv' : 'text',
           fileSize: doc.word_count ? `${doc.word_count} words` : undefined,
           fileUrl: doc.file_url,
           processing_status: doc.processing_status,
@@ -129,7 +131,7 @@ export const useKnowledgeBase = () => {
     
     return knowledgeItems.filter(item => 
       category === 'hrhub' ? 
-        (item.type === 'pdf' || item.type === 'doc') : 
+        (item.type === 'pdf' || item.type === 'doc' || item.type === 'csv') : 
         item.category === category
     );
   };

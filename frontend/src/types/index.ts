@@ -6,7 +6,7 @@ export interface KnowledgeItem {
     content?: string;
     category: string;
     file_type?: string;
-    type?: 'text' | 'pdf' | 'doc'; // For UI display
+    type?: 'text' | 'pdf' | 'doc' | 'csv'; // For UI display
     createdAt: Date;
     processing_status?: string;
     vectors_stored?: number;

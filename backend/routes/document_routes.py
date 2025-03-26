@@ -123,15 +123,15 @@ def upload_document():
                 organization_id=organization_id
             )
             
-            # Process document
+            # Extract text and metadata first
+            text, metadata, _ = DocumentLoaderFactory.extract_text_and_metadata(local_path)
+            
+            # Process document with properly extracted text
             vectors_stored = rag_system.process_document(
-                doc_text=open(local_path, 'r', encoding='utf-8', errors='replace').read(),
+                doc_text=text,
                 source_id=item_id,
                 namespace=None  # Will use organization-based namespace
             )
-            
-            # Extract text and metadata for storage
-            text, metadata, _ = DocumentLoaderFactory.extract_text_and_metadata(local_path)
             
             # Update document with content and metadata
             doc_ref.update({

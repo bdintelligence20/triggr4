@@ -124,6 +124,9 @@ class RAGSystem:
         self.pinecone_api_key = pinecone_api_key or os.environ.get("PINECONE_API_KEY")
         self.organization_id = organization_id
         
+        # Set timeouts for external API calls
+        self.api_timeout = int(os.environ.get("EXTERNAL_API_TIMEOUT", 30))  # Default 30 seconds
+        
         if not all([self.openai_api_key, self.anthropic_api_key, self.pinecone_api_key]):
             missing = []
             if not self.openai_api_key: missing.append("OpenAI")
@@ -485,7 +488,8 @@ class RAGSystem:
                 model="claude-3-7-sonnet-20250219",
                 max_tokens=8000,
                 temperature=1,
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "user", "content": prompt}],
+                timeout=self.api_timeout  # Add timeout for API calls
             )
             full_text = response.content[0].text
             chunk_size = 10
@@ -529,7 +533,8 @@ class RAGSystem:
                     model="claude-3-7-sonnet-20250219",
                     max_tokens=8000,
                     temperature=1,
-                    messages=[{"role": "user", "content": prompt}]
+                    messages=[{"role": "user", "content": prompt}],
+                    timeout=self.api_timeout  # Add timeout for streaming API calls
                 ) as stream:
                     for chunk in stream:
                         if chunk.type == "content_block_delta" and chunk.delta.text:

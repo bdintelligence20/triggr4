@@ -23,7 +23,7 @@ const FileUploader: React.FC = () => {
         type="file"
         ref={fileInputRef}
         onChange={handleFileUpload}
-        accept=".pdf,.doc,.docx,.txt"
+        accept=".pdf,.doc,.docx,.txt,.csv"
         className="hidden"
       />
       
