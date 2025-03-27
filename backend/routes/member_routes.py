@@ -280,8 +280,11 @@ def delete_member(member_id):
         return jsonify({'error': f'Failed to delete member: {str(e)}'}), 500
 
 def get_or_create_verify_service(twilio_client):
-    """Get existing Verify service or create a new one."""
+    """Get existing Verify service or create a new one and configure it for WhatsApp."""
     try:
+        # Approved WhatsApp template SID
+        WHATSAPP_TEMPLATE_SID = "HXb15ad263eec123a7d5adc9c78670ce5d"
+        
         # Check if we already have a service SID in environment variables
         verify_service_sid = os.environ.get("TWILIO_VERIFY_SERVICE_SID")
         if verify_service_sid:
@@ -289,6 +292,20 @@ def get_or_create_verify_service(twilio_client):
             try:
                 service = twilio_client.verify.v2.services(verify_service_sid).fetch()
                 logger.info(f"Using existing Verify service: {service.sid}")
+                
+                # Update the service to use our approved WhatsApp template
+                try:
+                    updated_service = twilio_client.verify.v2.services(verify_service_sid).update(
+                        messaging_configuration={
+                            'whatsapp': {
+                                'template_sid': WHATSAPP_TEMPLATE_SID
+                            }
+                        }
+                    )
+                    logger.info(f"Updated Verify service with custom WhatsApp template: {WHATSAPP_TEMPLATE_SID}")
+                except Exception as template_error:
+                    logger.error(f"Error updating Verify service with custom template: {str(template_error)}")
+                
                 return service.sid
             except Exception as e:
                 logger.warning(f"Stored Verify service SID is invalid: {str(e)}")
@@ -301,6 +318,20 @@ def get_or_create_verify_service(twilio_client):
         for service in services:
             if service.friendly_name == "Knowledge Hub Verification":
                 logger.info(f"Found existing Verify service: {service.sid}")
+                
+                # Update the service to use our approved WhatsApp template
+                try:
+                    updated_service = twilio_client.verify.v2.services(service.sid).update(
+                        messaging_configuration={
+                            'whatsapp': {
+                                'template_sid': WHATSAPP_TEMPLATE_SID
+                            }
+                        }
+                    )
+                    logger.info(f"Updated Verify service with custom WhatsApp template: {WHATSAPP_TEMPLATE_SID}")
+                except Exception as template_error:
+                    logger.error(f"Error updating Verify service with custom template: {str(template_error)}")
+                
                 return service.sid
         
         # If no service found, create a new one
@@ -308,6 +339,19 @@ def get_or_create_verify_service(twilio_client):
             friendly_name="Knowledge Hub Verification"
         )
         logger.info(f"Created new Verify service: {service.sid}")
+        
+        # Configure the new service with our approved WhatsApp template
+        try:
+            updated_service = twilio_client.verify.v2.services(service.sid).update(
+                messaging_configuration={
+                    'whatsapp': {
+                        'template_sid': WHATSAPP_TEMPLATE_SID
+                    }
+                }
+            )
+            logger.info(f"Configured new Verify service with custom WhatsApp template: {WHATSAPP_TEMPLATE_SID}")
+        except Exception as template_error:
+            logger.error(f"Error configuring new Verify service with custom template: {str(template_error)}")
         
         return service.sid
     except Exception as e:
