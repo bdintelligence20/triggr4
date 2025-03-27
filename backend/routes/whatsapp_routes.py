@@ -252,12 +252,17 @@ def create_member_conversation(twilio_client, member_id, phone_number, org_name)
         
         logger.info(f"Created new conversation: {conversation.sid} for member {member_id}")
         
+        # Ensure the phone number has the WhatsApp prefix for Conversations API
+        whatsapp_address = phone_number
+        if not whatsapp_address.startswith('whatsapp:'):
+            whatsapp_address = f"whatsapp:{phone_number}"
+        
         # Add the member as a participant (using their WhatsApp address)
         # IMPORTANT: Do NOT use identity parameter for WhatsApp participants
         try:
             member_participant = twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation.sid).participants.create(
                 # Removed identity parameter - not supported for WhatsApp
-                messaging_binding_address=phone_number,
+                messaging_binding_address=whatsapp_address,
                 messaging_binding_proxy_address=TWILIO_WHATSAPP_FROM
             )
             
@@ -620,8 +625,65 @@ def send_bulk_message():
                     # Format the message with personalization if needed
                     personalized_message = data.get('message').replace('{name}', member_data.get('name', 'Member'))
                     
-                    # Send the WhatsApp message
-                    send_whatsapp_message(phone_number, personalized_message)
+                    # Get or create a conversation for the member
+                    conversation_sid = member_data.get('conversationSid')
+                    
+                    if not conversation_sid:
+                        # If no conversation exists, create one
+                        logger.info(f"No conversation found for member {member_id}, creating one")
+                        try:
+                            conversation_sid = create_member_conversation(twilio_client, member_id, phone_number, "your organization")
+                            
+                            # Update member with conversation SID
+                            db.collection('members').document(member_id).update({
+                                'conversationSid': conversation_sid,
+                                'updatedAt': firestore.SERVER_TIMESTAMP
+                            })
+                            
+                            logger.info(f"Created new conversation {conversation_sid} for member {member_id}")
+                        except Exception as e:
+                            logger.error(f"Error creating conversation for member {member_id}: {str(e)}")
+                            # Fall back to direct messaging if conversation creation fails
+                            logger.info(f"Falling back to direct messaging for {phone_number}")
+                            send_whatsapp_message(phone_number, personalized_message)
+                            
+                            # Record the successful delivery
+                            results.append({
+                                'memberId': member_id,
+                                'status': 'sent',
+                                'phone': phone_number,
+                                'method': 'direct'
+                            })
+                            success_count += 1
+                            continue
+                    
+                    # Use Conversations API to send the message
+                    try:
+                        logger.info(f"Sending broadcast message via Conversations API to {phone_number}")
+                        send_conversation_message(twilio_client, conversation_sid, personalized_message, author="admin")
+                        
+                        # Record the successful delivery
+                        results.append({
+                            'memberId': member_id,
+                            'status': 'sent',
+                            'phone': phone_number,
+                            'method': 'conversation'
+                        })
+                        success_count += 1
+                    except Exception as e:
+                        logger.error(f"Error sending message via Conversations API: {str(e)}")
+                        # Fall back to direct messaging if Conversations API fails
+                        logger.info(f"Falling back to direct messaging for {phone_number}")
+                        send_whatsapp_message(phone_number, personalized_message)
+                        
+                        # Record the successful delivery
+                        results.append({
+                            'memberId': member_id,
+                            'status': 'sent',
+                            'phone': phone_number,
+                            'method': 'direct_fallback'
+                        })
+                        success_count += 1
                     
                     # Record the successful delivery
                     results.append({
@@ -764,18 +826,38 @@ def whatsapp_webhook():
             # Sanitize the response for WhatsApp
             sanitized_text = sanitize_ai_response(response.get('answer', 'Sorry, I could not find an answer.'))
             
-            # Check if we should use Conversations API
-            use_conversations_api = bool(member_data.get('conversationSid'))
+            # Get or create a conversation for the member
             conversation_sid = member_data.get('conversationSid')
             
-            if use_conversations_api and conversation_sid:
-                # For Conversations API, send only the AI response without intermediate messages
+            if not conversation_sid:
+                # If no conversation exists, create one
+                logger.info(f"No conversation found for member {member_data['id']}, creating one")
+                try:
+                    conversation_sid = create_member_conversation(twilio_client, member_data['id'], from_number, org_name)
+                    
+                    # Update member with conversation SID
+                    db.collection('members').document(member_data['id']).update({
+                        'conversationSid': conversation_sid,
+                        'updatedAt': firestore.SERVER_TIMESTAMP
+                    })
+                    
+                    logger.info(f"Created new conversation {conversation_sid} for member {member_data['id']}")
+                except Exception as e:
+                    logger.error(f"Error creating conversation for member {member_data['id']}: {str(e)}")
+                    # Fall back to direct messaging if conversation creation fails
+                    logger.info(f"Falling back to direct messaging for {from_number}")
+                    content_variables = {"1": sanitized_text}
+                    return send_whatsapp_template_message(from_number, TEMPLATE_CONTENT_SID, content_variables)
+            
+            # Use Conversations API to send the response
+            try:
                 logger.info(f"Sending response via Conversations API to {from_number}")
                 send_conversation_message(twilio_client, conversation_sid, sanitized_text)
                 return create_twilio_response("")
-            else:
-                # For direct WhatsApp messaging, send only the AI response without intermediate messages
-                logger.info(f"Sending response via template to {from_number}")
+            except Exception as e:
+                logger.error(f"Error sending message via Conversations API: {str(e)}")
+                # Fall back to direct messaging if Conversations API fails
+                logger.info(f"Falling back to direct messaging for {from_number}")
                 content_variables = {"1": sanitized_text}
                 return send_whatsapp_template_message(from_number, TEMPLATE_CONTENT_SID, content_variables)
                 
