@@ -17,6 +17,8 @@ interface AppContextType {
   setIsLoading: (value: boolean) => void;
   error: string | null;
   setError: (value: string | null) => void;
+  organizationLogo: string | null;
+  setOrganizationLogo: (value: string | null) => void;
   
   // Knowledge States
   searchQuery: string;
@@ -76,6 +78,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [notification, setNotification] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [organizationLogo, setOrganizationLogo] = useState<string | null>(
+    localStorage.getItem('organization_logo')
+  );
   
   // Knowledge States
   const [searchQuery, setSearchQuery] = useState('');
@@ -96,6 +101,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       console.log(`Organization changed to: ${organizationId}. State reset.`);
     }
   }, [organizationId]);
+  
+  // Save logo to localStorage when it changes
+  useEffect(() => {
+    if (organizationLogo) {
+      localStorage.setItem('organization_logo', organizationLogo);
+    } else {
+      localStorage.removeItem('organization_logo');
+    }
+  }, [organizationLogo]);
   
   // Listen for logout events to reset state
   useEffect(() => {
@@ -230,6 +244,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIsLoading,
     error,
     setError,
+    organizationLogo,
+    setOrganizationLogo,
     
     // Knowledge States
     searchQuery,

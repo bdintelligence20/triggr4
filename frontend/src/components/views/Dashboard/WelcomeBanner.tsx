@@ -1,6 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Calendar, ChevronDown } from 'lucide-react';
+import LogoUploader from '../../ui/LogoUploader';
+import { useAppContext } from '../../../contexts/AppContext';
+import { useAuth } from '../../../contexts/AuthContext';
 import useRoleStore from '../../../store/roleStore';
 import useHubStore from '../../../store/hubStore';
 import { demoHubs } from '../../data/demo-data';
@@ -10,6 +13,44 @@ import * as Tooltip from '@radix-ui/react-tooltip';
 const WelcomeBanner = () => {
   const { currentRole } = useRoleStore();
   const { selectedHubId, setSelectedHub } = useHubStore();
+  const { organizationLogo, setOrganizationLogo } = useAppContext();
+  const { user } = useAuth();
+  const [greeting, setGreeting] = useState<string>('Welcome');
+  
+  // Array of diverse greetings
+  const greetings = [
+    'Hi',
+    'Hey',
+    'Hello',
+    'Yo',
+    'Greetings',
+    'Howdy',
+    'Good day',
+    'What\'s up',
+    'Hiya',
+    'Sup',
+    'G\'day',
+    'Bonjour',
+    'Ciao',
+    'Aloha',
+    'Namaste',
+    'Salutations',
+    'Hola',
+    'Cheers',
+    'Welcome back'
+  ];
+  
+  // Select a random greeting on component mount or refresh
+  useEffect(() => {
+    const randomIndex = Math.floor(Math.random() * greetings.length);
+    setGreeting(greetings[randomIndex]);
+  }, []);
+  
+  // Get user's first name
+  const getFirstName = () => {
+    if (!user || !user.fullName) return '';
+    return user.fullName.split(' ')[0];
+  };
   
   const today = new Date().toLocaleDateString('en-US', { 
     weekday: 'long',
@@ -55,12 +96,13 @@ const WelcomeBanner = () => {
             className="flex-1 min-w-0"
           >
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center p-3">
-                <span className="text-sm font-bold text-emerald-400">Logo</span>
-              </div>
+              <LogoUploader 
+                currentLogo={organizationLogo || undefined} 
+                onLogoChange={setOrganizationLogo} 
+              />
               <div>
                 <h1 className="text-2xl font-bold text-gray-900 leading-tight truncate">
-                  Welcome, {getRoleTitle()}
+                  {greeting}, {getFirstName() || getRoleTitle()}
                 </h1>
                 <div className="flex items-center gap-4 text-gray-500 mt-2">
                   <div className="flex items-center gap-2">
