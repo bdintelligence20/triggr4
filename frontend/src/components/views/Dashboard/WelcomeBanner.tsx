@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Calendar, ChevronDown } from 'lucide-react';
-import LogoUploader from '../../ui/LogoUploader';
 import { useAppContext } from '../../../contexts/AppContext';
 import { useAuth } from '../../../contexts/AuthContext';
 import useRoleStore from '../../../store/roleStore';
@@ -13,7 +12,7 @@ import * as Tooltip from '@radix-ui/react-tooltip';
 const WelcomeBanner = () => {
   const { currentRole } = useRoleStore();
   const { selectedHubId, setSelectedHub } = useHubStore();
-  const { organizationLogo, setOrganizationLogo } = useAppContext();
+  const { } = useAppContext();
   const { user } = useAuth();
   const [greeting, setGreeting] = useState<string>('Welcome');
   
@@ -95,20 +94,14 @@ const WelcomeBanner = () => {
             animate={{ opacity: 1, y: 0 }}
             className="flex-1 min-w-0"
           >
-            <div className="flex items-center gap-4">
-              <LogoUploader 
-                currentLogo={organizationLogo || undefined} 
-                onLogoChange={setOrganizationLogo} 
-              />
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900 leading-tight truncate">
-                  {greeting}, {getFirstName() || getRoleTitle()}
-                </h1>
-                <div className="flex items-center gap-4 text-gray-500 mt-2">
-                  <div className="flex items-center gap-2">
-                    <Calendar size={16} />
-                    <span>{today}</span>
-                  </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 leading-tight truncate">
+                {greeting}, {getFirstName() || getRoleTitle()}
+              </h1>
+              <div className="flex items-center gap-4 text-gray-500 mt-2">
+                <div className="flex items-center gap-2">
+                  <Calendar size={16} />
+                  <span>{today}</span>
                 </div>
               </div>
             </div>

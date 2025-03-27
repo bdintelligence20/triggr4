@@ -9,6 +9,7 @@ interface AppContextType {
   setDarkMode: (value: boolean) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (value: boolean) => void;
+  toggleSidebar: () => void;
   activeTab: string;
   setActiveTab: (value: string) => void;
   notification: string | null;
@@ -17,8 +18,6 @@ interface AppContextType {
   setIsLoading: (value: boolean) => void;
   error: string | null;
   setError: (value: string | null) => void;
-  organizationLogo: string | null;
-  setOrganizationLogo: (value: string | null) => void;
   
   // Knowledge States
   searchQuery: string;
@@ -73,14 +72,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   
   // UI States
   const [darkMode, setDarkMode] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    // Initialize sidebar state based on screen size
+    return window.innerWidth >= 1024; // Open by default on desktop, closed on mobile
+  });
+  
+  // Function to toggle sidebar
+  const toggleSidebar = () => {
+    setSidebarOpen(prev => !prev);
+  };
   const [activeTab, setActiveTab] = useState('library');
   const [notification, setNotification] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [organizationLogo, setOrganizationLogo] = useState<string | null>(
-    localStorage.getItem('organization_logo')
-  );
   
   // Knowledge States
   const [searchQuery, setSearchQuery] = useState('');
@@ -102,14 +106,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, [organizationId]);
   
-  // Save logo to localStorage when it changes
-  useEffect(() => {
-    if (organizationLogo) {
-      localStorage.setItem('organization_logo', organizationLogo);
-    } else {
-      localStorage.removeItem('organization_logo');
-    }
-  }, [organizationLogo]);
   
   // Listen for logout events to reset state
   useEffect(() => {
@@ -236,6 +232,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setDarkMode,
     sidebarOpen,
     setSidebarOpen,
+    toggleSidebar,
     activeTab,
     setActiveTab,
     notification,
@@ -244,8 +241,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setIsLoading,
     error,
     setError,
-    organizationLogo,
-    setOrganizationLogo,
     
     // Knowledge States
     searchQuery,

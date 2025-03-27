@@ -34,6 +34,17 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                 <div className="animate-pulse h-2 w-2 bg-emerald-400 dark:bg-emerald-500 rounded-full" style={{animationDelay: '0.4s'}}></div>
               </div>
             )}
+            {/* Display first three lines as short description */}
+            {message.content && (
+              <div className="text-sm mb-3 text-gray-700 dark:text-gray-300">
+                {message.content
+                  .split('\n')
+                  .slice(0, 3)
+                  .map((line, index) => (
+                    <p key={index}>{line}</p>
+                  ))}
+              </div>
+            )}
             <div className="markdown-content">
               <ReactMarkdown 
                 remarkPlugins={[remarkGfm]} 

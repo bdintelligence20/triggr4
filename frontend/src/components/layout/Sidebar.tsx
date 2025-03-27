@@ -1,7 +1,7 @@
 // components/layout/Sidebar.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Book, FileText, MessageSquare, LogOut, Bell, User, Settings, ChevronDown } from 'lucide-react';
+import { Book, FileText, MessageSquare, LogOut, Bell, User, Settings, ChevronDown, ChevronLeft } from 'lucide-react';
 import { useAppContext } from '../../contexts/AppContext';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -9,6 +9,8 @@ const Sidebar: React.FC = () => {
   const location = useLocation();
   const {
     sidebarOpen,
+    setSidebarOpen,
+    toggleSidebar,
     selectedCategory,
     setSelectedCategory,
     categories,
@@ -50,12 +52,31 @@ const Sidebar: React.FC = () => {
   };
 
   return (
-    <aside 
-      className={`w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 ${
-        sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-      } lg:translate-x-0 fixed lg:relative z-40 h-[calc(100vh-4rem)]`}
-    >
-      <div className="flex-grow overflow-y-auto flex flex-col h-full">
+    <>
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-30 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      
+      <aside 
+        className={`w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        } fixed z-40 h-[calc(100vh-4rem)]`}
+      >
+        {/* Sidebar toggle button */}
+        <button
+          onClick={toggleSidebar}
+          className="absolute -right-10 top-4 bg-white dark:bg-gray-900 p-2 rounded-r-md border border-l-0 border-gray-200 dark:border-gray-700 hidden lg:flex items-center justify-center text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        >
+          <ChevronLeft 
+            size={20} 
+            className={`transform transition-transform ${sidebarOpen ? '' : 'rotate-180'}`} 
+          />
+        </button>
+        <div className="flex-grow overflow-y-auto flex flex-col h-full">
         {/* User Profile */}
         <div className="p-4 border-b border-gray-200 dark:border-gray-700" ref={profileRef}>
           <div 
@@ -179,8 +200,9 @@ const Sidebar: React.FC = () => {
             <span>Logout</span>
           </button>
         </div>
-      </div>
-    </aside>
+        </div>
+      </aside>
+    </>
   );
 };
 
