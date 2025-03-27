@@ -405,12 +405,12 @@ def send_whatsapp_verification():
             try:
                 logger.info(f"Sending WhatsApp verification to {to_number} using service {verify_service_sid}")
                 
-                # Explicitly specify the channel as "whatsapp" and force production mode
+                # Explicitly specify the channel as "whatsapp"
                 verification = twilio_client.verify.v2.services(verify_service_sid).verifications.create(
                     to=to_number,
                     channel="whatsapp",
-                    locale="en",  # Specify locale to ensure proper template selection
-                    custom_friendly_name=f"Knowledge Hub Verification for {org_name}"  # Add friendly name
+                    locale="en"  # Specify locale to ensure proper template selection
+                    # Removed custom_friendly_name parameter which was causing the error
                 )
                 
                 logger.info(f"WhatsApp verification sent. SID: {verification.sid}, Channel: {verification.channel}, Status: {verification.status}")
