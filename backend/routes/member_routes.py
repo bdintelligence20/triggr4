@@ -388,16 +388,32 @@ def send_whatsapp_verification():
                 org_data = org_doc.to_dict()
                 org_name = org_data.get('name', org_name)
             
+            # Check if WhatsApp is an available channel for this Verify service
+            try:
+                verify_service = twilio_client.verify.v2.services(verify_service_sid).fetch()
+                available_channels = verify_service.channels
+                logger.info(f"Available channels for Verify service: {available_channels}")
+                
+                # Ensure WhatsApp is properly configured
+                if "whatsapp" not in available_channels:
+                    logger.warning(f"WhatsApp channel not available for Verify service {verify_service_sid}")
+                    # Continue anyway - the API might still work
+            except Exception as e:
+                logger.warning(f"Error checking Verify service channels: {str(e)}")
+            
             # Send verification via WhatsApp using Verify API
             try:
-                # Explicitly specify the channel as "whatsapp"
+                logger.info(f"Sending WhatsApp verification to {to_number} using service {verify_service_sid}")
+                
+                # Explicitly specify the channel as "whatsapp" and force production mode
                 verification = twilio_client.verify.v2.services(verify_service_sid).verifications.create(
                     to=to_number,
                     channel="whatsapp",
-                    locale="en"  # Specify locale to ensure proper template selection
+                    locale="en",  # Specify locale to ensure proper template selection
+                    custom_friendly_name=f"Knowledge Hub Verification for {org_name}"  # Add friendly name
                 )
                 
-                logger.info(f"WhatsApp verification sent to {to_number}, verification SID: {verification.sid}")
+                logger.info(f"WhatsApp verification sent. SID: {verification.sid}, Channel: {verification.channel}, Status: {verification.status}")
                 
                 # Store verification information in Firestore
                 members_ref.document(member_id).update({

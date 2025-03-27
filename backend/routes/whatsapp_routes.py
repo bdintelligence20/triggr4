@@ -95,6 +95,11 @@ def send_whatsapp_template_message(to_number, content_sid, content_variables):
     if not to_number.startswith('whatsapp:'):
         to_number = f"whatsapp:{to_number}"
     
+    # Log template content for debugging
+    content_preview = content_variables.get("1", "")[:100] + "..." if len(content_variables.get("1", "")) > 100 else content_variables.get("1", "")
+    logger.info(f"Preparing template message with content length: {len(content_variables.get('1', ''))}")
+    logger.info(f"Template content preview: {content_preview}")
+    
     try:
         # Try using the template with messaging service
         message = twilio_client.messages.create(
@@ -103,18 +108,38 @@ def send_whatsapp_template_message(to_number, content_sid, content_variables):
             messaging_service_sid=TWILIO_MESSAGING_SERVICE_SID,
             to=to_number
         )
-        logger.info(f"Templated message sent. Template SID: {content_sid}, Message SID: {message.sid}")
+        logger.info(f"Templated message sent successfully. Template SID: {content_sid}, Message SID: {message.sid}")
         return create_twilio_response("")
     except Exception as e:
         error_message = str(e)
-        if "content_sid" in error_message.lower() or "template" in error_message.lower():
-            logger.error(f"Template error with SID {content_sid}: {error_message}")
-            # Fall back to plain text message if template fails
-            logger.info(f"Falling back to plain text message")
-            return send_whatsapp_message(to_number, content_variables.get("1", ""))
-        else:
-            logger.error(f"Error sending templated WhatsApp message: {error_message}")
-            return create_twilio_response(f"Error: {error_message}")
+        logger.error(f"Template error: {error_message}")
+        
+        # Detailed error analysis
+        if "content" in error_message.lower():
+            logger.error(f"Content issue detected. Content length: {len(content_variables.get('1', ''))}")
+            logger.error(f"Content sample: {content_variables.get('1', '')[:200]}...")
+            
+            # Try to sanitize the content further
+            sanitized_content = re.sub(r'[^\w\s.,;:!?()]', '', content_variables.get("1", ""))
+            logger.info(f"Attempting with more aggressively sanitized content (length: {len(sanitized_content)})")
+            
+            try:
+                # Try again with more sanitized content
+                message = twilio_client.messages.create(
+                    content_sid=content_sid,
+                    content_variables=json.dumps({"1": sanitized_content}),
+                    messaging_service_sid=TWILIO_MESSAGING_SERVICE_SID,
+                    to=to_number
+                )
+                logger.info(f"Templated message sent with sanitized content. Message SID: {message.sid}")
+                return create_twilio_response("")
+            except Exception as retry_error:
+                logger.error(f"Still failed with sanitized content: {str(retry_error)}")
+                # Fall back to direct message
+        
+        # Fall back to plain text message if template fails
+        logger.info(f"Falling back to plain text message")
+        return send_whatsapp_message(to_number, content_variables.get("1", ""))
 
 def get_member_by_phone(phone_number):
     """Get member data by phone number."""
@@ -214,35 +239,45 @@ def create_member_conversation(twilio_client, member_id, phone_number, org_name)
         # Create a unique conversation friendly name
         friendly_name = f"Member {member_id} - {phone_number}"
         
-        # Create a new conversation
+        # Create a new conversation with detailed member info in attributes
         conversation = twilio_client.conversations.v1.services(conversations_service_sid).conversations.create(
             friendly_name=friendly_name,
             attributes=json.dumps({
                 "memberId": member_id,
-                "organizationName": org_name
+                "organizationName": org_name,
+                "memberPhone": phone_number,
+                "createdAt": datetime.now().isoformat()
             })
         )
         
         logger.info(f"Created new conversation: {conversation.sid} for member {member_id}")
         
         # Add the member as a participant (using their WhatsApp address)
-        whatsapp_address = f"whatsapp:{phone_number}"
-        member_participant = twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation.sid).participants.create(
-            identity=member_id,  # Use member_id as the identity
-            messaging_binding_address=phone_number,
-            messaging_binding_proxy_address=TWILIO_WHATSAPP_FROM
-        )
-        
-        logger.info(f"Added member {member_id} as participant to conversation {conversation.sid}")
+        # IMPORTANT: Do NOT use identity parameter for WhatsApp participants
+        try:
+            member_participant = twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation.sid).participants.create(
+                # Removed identity parameter - not supported for WhatsApp
+                messaging_binding_address=phone_number,
+                messaging_binding_proxy_address=TWILIO_WHATSAPP_FROM
+            )
+            
+            logger.info(f"Added member {member_id} as participant to conversation {conversation.sid}")
+        except Exception as e:
+            logger.error(f"Error adding participant to conversation: {str(e)}")
+            # Continue with conversation creation even if participant addition fails
         
         # Send a welcome message
-        welcome_message = f"Welcome to the {org_name} Knowledge Hub! You can ask questions about your organization's knowledge base here."
-        twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation.sid).messages.create(
-            author="system",
-            body=welcome_message
-        )
-        
-        logger.info(f"Sent welcome message to conversation {conversation.sid}")
+        try:
+            welcome_message = f"Welcome to the {org_name} Knowledge Hub! You can ask questions about your organization's knowledge base here."
+            twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation.sid).messages.create(
+                author="system",
+                body=welcome_message
+            )
+            
+            logger.info(f"Sent welcome message to conversation {conversation.sid}")
+        except Exception as e:
+            logger.error(f"Error sending welcome message: {str(e)}")
+            # Continue even if welcome message fails
         
         return conversation.sid
     except Exception as e:
@@ -250,7 +285,7 @@ def create_member_conversation(twilio_client, member_id, phone_number, org_name)
         raise
 
 def sanitize_ai_response(text):
-    """Remove markdown and special characters from AI responses."""
+    """Aggressively sanitize AI responses for WhatsApp templates."""
     # Remove markdown headers (# Header)
     text = re.sub(r'^#+ +(.+)$', r'\1', text, flags=re.MULTILINE)
     
@@ -267,9 +302,20 @@ def sanitize_ai_response(text):
     # Remove markdown inline code
     text = re.sub(r'`(.+?)`', r'\1', text)
     
-    # Remove excessive newlines
-    text = re.sub(r'\n{3,}', '\n\n', text)
+    # Remove special characters that might trigger WhatsApp filters
+    # Keep only alphanumeric, basic punctuation, and common symbols
+    text = re.sub(r'[^\w\s.,;:!?()\-+\'\"\/]', '', text)
     
+    # Limit length to ensure it fits in WhatsApp template
+    max_length = 1000  # WhatsApp templates have character limits
+    if len(text) > max_length:
+        text = text[:max_length-3] + "..."
+    
+    # Remove excessive whitespace
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r' {2,}', ' ', text)
+    
+    # Ensure there are no leading/trailing whitespaces
     return text.strip()
 
 def send_conversation_message(twilio_client, conversation_sid, message, author="system"):
@@ -666,282 +712,77 @@ def whatsapp_webhook():
         
         # Skip empty messages
         if not incoming_msg:
-            return create_twilio_response("I couldn't understand your message. Please try again.")
+            logger.info(f"Empty message received from {from_number}, ignoring")
+            return create_twilio_response("")
         
-        # Check if this is a verification code
+        # First, check if this is a verification code
         verification_response = handle_verification_code(from_number, incoming_msg)
         if verification_response:
+            logger.info(f"Verification code handled for {from_number}")
             return verification_response
         
-        # Get member data by phone number
-        member = get_member_by_phone(from_number)
-        
-        # Check if member exists and is verified
-        if not member:
+        # Get member data
+        member_data = get_member_by_phone(from_number)
+        if not member_data:
+            logger.warning(f"No member found for phone number {from_number}")
             return create_twilio_response("❌ Your number is not registered in our system. Please contact your organization administrator.")
         
-        if not member.get('whatsappVerified'):
-            return create_twilio_response("❌ Your WhatsApp number is not verified. Please verify your number with the code sent to you.")
+        # Check if member is verified
+        if not member_data.get('whatsappVerified'):
+            logger.warning(f"Member {member_data['id']} with phone {from_number} is not verified")
+            return create_twilio_response("❌ Your WhatsApp number is not verified. Please verify your number first.")
         
-        # Get organization ID
-        organization_id = member.get('organizationId')
-        if not organization_id:
-            return create_twilio_response("❌ Your account is not associated with an organization. Please contact your administrator.")
+        # Get organization data for multi-tenancy
+        org_id = member_data.get('organizationId')
+        if not org_id:
+            logger.warning(f"Member {member_data['id']} does not belong to any organization")
+            return create_twilio_response("❌ You are not associated with any organization. Please contact your administrator.")
         
-        # Initialize Twilio client
-        twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        # Get organization name
+        org_name = "your organization"
+        org_doc = db.collection('organizations').document(org_id).get()
+        if org_doc.exists:
+            org_data = org_doc.to_dict()
+            org_name = org_data.get('name', org_name)
         
-        # Check if member has a conversation SID
-        conversation_sid = member.get('conversationSid')
-        use_conversations_api = False
+        # Initialize RAG system with organization ID for multi-tenancy
+        rag = RAGSystem(
+            openai_api_key=OPENAI_API_KEY,
+            anthropic_api_key=ANTHROPIC_API_KEY,
+            pinecone_api_key=PINECONE_API_KEY,
+            pinecone_index_name=PINECONE_INDEX_NAME,
+            organization_id=org_id
+        )
         
-        # If member doesn't have a conversation SID, create one
-        if not conversation_sid:
-            try:
-                # Get organization name
-                org_name = "your organization"
-                org_doc = db.collection('organizations').document(organization_id).get()
-                if org_doc.exists:
-                    org_data = org_doc.to_dict()
-                    org_name = org_data.get('name', org_name)
-                
-                # Create a conversation for the member
-                conversation_sid = create_member_conversation(twilio_client, member.get('id'), from_number.replace('whatsapp:', ''), org_name)
-                logger.info(f"Created new conversation {conversation_sid} for member {member.get('id')}")
-                
-                # Update member with conversation SID
-                db.collection('members').document(member.get('id')).update({
-                    'conversationSid': conversation_sid
-                })
-                
-                use_conversations_api = True
-            except Exception as e:
-                logger.error(f"Error creating conversation for member {member.get('id')}: {str(e)}")
-                # Fall back to direct WhatsApp messaging
-                use_conversations_api = False
-        else:
-            use_conversations_api = True
-        
-        # Create a unique ID for this conversation
-        conversation_id = str(uuid.uuid4())
-        
-        # Log the conversation in Firestore
-        db.collection("whatsapp_conversations").document(conversation_id).set({
-            "from": from_number,
-            "message": incoming_msg,
-            "timestamp": firestore.SERVER_TIMESTAMP,
-            "status": "received",
-            "memberId": member.get('id'),
-            "organizationId": organization_id
-        })
-        
-        # Send initial acknowledgment message
-        if use_conversations_api:
-            try:
-                send_conversation_message(twilio_client, conversation_sid, "I'm searching through our knowledge base...")
-            except Exception as e:
-                logger.error(f"Error sending conversation message: {str(e)}")
-                # Fall back to direct WhatsApp messaging
-                send_whatsapp_message(from_number, "⏳ I'm searching through our knowledge base...")
-                use_conversations_api = False
-        else:
-            send_whatsapp_message(from_number, "⏳ I'm searching through our knowledge base...")
-        
+        # Process the query
         try:
-            try:
-                # Initialize custom RAG system with organization ID
-                logger.info(f"Initializing RAG system for organization: {organization_id}")
-                whatsapp_rag = RAGSystem(
-                    openai_api_key=OPENAI_API_KEY,
-                    anthropic_api_key=ANTHROPIC_API_KEY,
-                    pinecone_api_key=PINECONE_API_KEY,
-                    index_name=PINECONE_INDEX_NAME,
-                    organization_id=organization_id  # Pass organization ID to filter results
-                )
-                logger.info(f"RAG system initialized with organization filter: {organization_id}")
-                
-                # Get previous conversation history for this member if available
-                conversation_history = ""
-                try:
-                    # Get the last 5 WhatsApp conversations for this member
-                    conv_query = db.collection("whatsapp_conversations") \
-                        .where("memberId", "==", member.get('id')) \
-                        .where("organizationId", "==", organization_id) \
-                        .order_by("timestamp", direction=firestore.Query.DESCENDING) \
-                        .limit(10)
-                    
-                    conversations = list(conv_query.stream())
-                    
-                    if conversations:
-                        # Format conversations as history
-                        history_parts = []
-                        for conv in reversed(conversations):
-                            conv_data = conv.to_dict()
-                            if conv_data.get("from") == from_number:
-                                history_parts.append(f"User: {conv_data.get('message', '')}")
-                            elif conv_data.get("from") == "system":
-                                history_parts.append(f"AI: {conv_data.get('message', '')}")
-                        
-                        conversation_history = "\n".join(history_parts)
-                        logger.info(f"Retrieved conversation history for member {member.get('id')}")
-                except Exception as e:
-                    logger.warning(f"Error retrieving conversation history: {str(e)}")
-                
-                # Collect the full response
-                accumulated_text = []
-                
-                def stream_callback(chunk):
-                    accumulated_text.append(chunk)
-                
-                # Query the RAG system with conversation history
-                result = whatsapp_rag.query(
-                    user_query=incoming_msg,
-                    stream_callback=stream_callback,
-                    history=conversation_history
-                )
-            except Exception as e:
-                logger.error(f"Error initializing RAG system: {str(e)}")
-                error_message = "❌ I'm sorry, I encountered an error setting up the knowledge base. Please try again later."
-                if use_conversations_api:
-                    send_conversation_message(twilio_client, conversation_sid, error_message)
-                else:
-                    send_whatsapp_message(from_number, error_message)
-                return create_twilio_response("")
+            logger.info(f"Processing query from member {member_data['id']}: {incoming_msg}")
             
-            # Get the full response
-            full_text = ''.join(accumulated_text) if accumulated_text else result.get("answer", "")
+            # Get the response from RAG system
+            response = rag.query(incoming_msg)
             
-            if not full_text:
-                logger.warning(f"No relevant information found for query: '{incoming_msg}' from organization: {organization_id}")
-                error_message = "📚 I couldn't find any relevant information in our knowledge base. Please try asking a different question."
-                if use_conversations_api:
-                    send_conversation_message(twilio_client, conversation_sid, error_message)
-                else:
-                    send_whatsapp_message(from_number, error_message)
-                return create_twilio_response("")
+            # Sanitize the response for WhatsApp
+            sanitized_text = sanitize_ai_response(response.get('answer', 'Sorry, I could not find an answer.'))
             
-            # Log sources if available
-            if result and "sources" in result:
-                source_ids = [source.get('id', 'unknown') for source in result.get("sources", [])]
-                logger.info(f"Found {len(source_ids)} sources for query: '{incoming_msg}'. Sources: {source_ids}")
+            # Check if we should use Conversations API
+            use_conversations_api = bool(member_data.get('conversationSid'))
+            conversation_sid = member_data.get('conversationSid')
             
-            # Sanitize the AI response to remove markdown and special characters
-            sanitized_text = sanitize_ai_response(full_text)
-            
-            if use_conversations_api:
-                # Send the response through the Conversations API
+            if use_conversations_api and conversation_sid:
+                # For Conversations API, send only the AI response without intermediate messages
+                logger.info(f"Sending response via Conversations API to {from_number}")
                 send_conversation_message(twilio_client, conversation_sid, sanitized_text)
+                return create_twilio_response("")
             else:
-                # Send intermediate message
-                send_whatsapp_message(from_number, "🔍 Found relevant information! Preparing your answer...")
-                
-                # Send the complete answer using the approved template
+                # For direct WhatsApp messaging, send only the AI response without intermediate messages
+                logger.info(f"Sending response via template to {from_number}")
                 content_variables = {"1": sanitized_text}
-                logger.info(f"Sending response using template SID: {TEMPLATE_CONTENT_SID}")
-                send_whatsapp_template_message(from_number, TEMPLATE_CONTENT_SID, content_variables)
+                return send_whatsapp_template_message(from_number, TEMPLATE_CONTENT_SID, content_variables)
                 
-                # Send a completion message using freeform text
-                send_whatsapp_message(from_number, "✅ That completes my answer. Let me know if you need any clarification!")
-            
-            # Store the complete response in Firestore
-            db.collection("whatsapp_conversations").document(f"{conversation_id}_response").set({
-                "from": "system",
-                "to": from_number,
-                "message": full_text,
-                "timestamp": firestore.SERVER_TIMESTAMP,
-                "status": "completed",
-                "in_response_to": conversation_id,
-                "memberId": member.get('id'),
-                "organizationId": organization_id,
-                "sources": [source.get('id', 'unknown') for source in result.get("sources", [])]
-            })
-            
-            # Return empty TwiML response as we've already sent the messages
-            return create_twilio_response("")
-            
-        except Exception as e:
-            logger.error(f"Error processing WhatsApp message: {str(e)}", exc_info=True)
-            error_message = "❌ I'm sorry, I encountered an error processing your request. Please try again later."
-            if use_conversations_api:
-                try:
-                    send_conversation_message(twilio_client, conversation_sid, error_message)
-                except:
-                    send_whatsapp_message(from_number, error_message)
-            else:
-                send_whatsapp_message(from_number, error_message)
-            return create_twilio_response("")
-        
+        except Exception as query_error:
+            logger.error(f"Error processing query: {str(query_error)}")
+            return create_twilio_response("❌ Sorry, I encountered an error while processing your query. Please try again later.")
+    
     except Exception as e:
-        logger.error(f"WhatsApp webhook error: {str(e)}", exc_info=True)
-        return create_twilio_response("An error occurred. Please try again later.")
-
-@whatsapp_bp.route('/conversation-webhook', methods=['POST'])
-def conversation_webhook():
-    """Handle Twilio Conversations webhook events."""
-    try:
-        # Get the webhook data
-        webhook_data = request.json
-        
-        # Log the webhook data
-        logger.info(f"Received Conversations webhook: {webhook_data}")
-        
-        # Get the event type
-        event_type = webhook_data.get('EventType')
-        
-        # Handle different event types
-        if event_type == 'onMessageAdded':
-            # Get the message data
-            message_data = webhook_data.get('Message', {})
-            
-            # Get the conversation SID
-            conversation_sid = message_data.get('ConversationSid')
-            
-            # Get the message body
-            message_body = message_data.get('Body', '')
-            
-            # Get the author
-            author = message_data.get('Author', '')
-            
-            # Skip system messages
-            if author == 'system':
-                return jsonify({'status': 'success'}), 200
-            
-            # Get the conversation attributes
-            conversation_attributes = webhook_data.get('Conversation', {}).get('Attributes', '{}')
-            try:
-                attributes = json.loads(conversation_attributes)
-                member_id = attributes.get('memberId')
-            except:
-                member_id = None
-            
-            if member_id:
-                # Get the member data
-                member_doc = db.collection('members').document(member_id).get()
-                if member_doc.exists:
-                    member_data = member_doc.to_dict()
-                    
-                    # Process the message as if it came from the WhatsApp webhook
-                    # This is a simplified version - in a real implementation, you would
-                    # extract this logic into a separate function to avoid code duplication
-                    logger.info(f"Processing Conversations message from member {member_id}: {message_body}")
-                    
-                    # TODO: Process the message using the RAG system
-                    # For now, just acknowledge receipt
-                    try:
-                        # Initialize Twilio client
-                        twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-                        
-                        # Send a response
-                        send_conversation_message(
-                            twilio_client, 
-                            conversation_sid, 
-                            "I received your message through the Conversations API. This feature is coming soon!"
-                        )
-                    except Exception as e:
-                        logger.error(f"Error sending Conversations response: {str(e)}")
-        
-        return jsonify({'status': 'success'}), 200
-        
-    except Exception as e:
-        logger.error(f"Conversation webhook error: {str(e)}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error in WhatsApp webhook: {str(e)}")
+        return create_twilio_response("❌ An error occurred. Please try again later.")
