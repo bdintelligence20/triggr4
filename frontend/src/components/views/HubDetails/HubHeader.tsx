@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, AlertTriangle, Book, Plug, Users, Share2 } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Book, Users, Share2, Upload } from 'lucide-react';
+import { useHub } from '../../../contexts/HubContext';
+import { useAuth } from '../../../contexts/AuthContext';
 
 interface HubHeaderProps {
   hubId: number;
@@ -19,33 +21,41 @@ const HubHeader: React.FC<HubHeaderProps> = ({
   isAdmin,
   onShare
 }) => {
+  const { hubName } = useHub();
+  const { user } = useAuth();
+  const [customBgImage, setCustomBgImage] = useState<string | null>(null);
+  const [showImageUpload, setShowImageUpload] = useState(false);
+  
   const getHubInfo = () => {
-    const hubs = {
-      1: {
-        name: 'Customer Service Hub',
-        description: 'Manage client relationships and support',
-        image: 'https://images.unsplash.com/photo-1664575602276-acd073f104c1?q=80&w=2070&auto=format&fit=crop'
-      },
-      2: {
-        name: 'HR Hub',
-        description: 'Handle employee management and HR processes',
-        image: 'https://images.unsplash.com/photo-1542744094-24638eff58bb?q=80&w=2070&auto=format&fit=crop'
-      },
-      3: {
-        name: 'Project Management Hub',
-        description: 'Oversee project planning and execution',
-        image: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?q=80&w=2070&auto=format&fit=crop'
-      },
-      4: {
-        name: 'QHSE Hub',
-        description: 'Monitor quality, health, safety, and environmental compliance',
-        image: 'https://images.unsplash.com/photo-1581092918056-0c4c3acd3789?q=80&w=2070&auto=format&fit=crop'
-      }
+    const defaultImages = {
+      1: 'https://images.unsplash.com/photo-1664575602276-acd073f104c1?q=80&w=2070&auto=format&fit=crop',
+      2: 'https://images.unsplash.com/photo-1542744094-24638eff58bb?q=80&w=2070&auto=format&fit=crop',
+      3: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?q=80&w=2070&auto=format&fit=crop',
+      4: 'https://images.unsplash.com/photo-1581092918056-0c4c3acd3789?q=80&w=2070&auto=format&fit=crop'
     };
-    return hubs[hubId as keyof typeof hubs] || hubs[1];
+    
+    return {
+      name: `The ${user?.organizationName || 'Organization'} Hub`,
+      description: 'Your centralized knowledge repository',
+      image: customBgImage || defaultImages[hubId as keyof typeof defaultImages] || defaultImages[1]
+    };
   };
 
   const hub = getHubInfo();
+  
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setCustomBgImage(event.target.result as string);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+    setShowImageUpload(false);
+  };
 
   return (
     <div className="relative">
@@ -62,14 +72,36 @@ const HubHeader: React.FC<HubHeaderProps> = ({
         >
           <ArrowLeft size={18} />
         </button>
-        {onShare && (
-          <button
-            onClick={onShare}
-            className="absolute top-4 right-4 flex items-center gap-2 px-4 py-2 bg-[#25D366] text-white rounded-lg hover:bg-[#1da851] transition-colors"
-          >
-            <Share2 size={18} />
-            <span>Share WhatsApp</span>
-          </button>
+        <div className="absolute top-4 right-4 flex items-center gap-2">
+          {isAdmin && (
+            <button
+              onClick={() => setShowImageUpload(!showImageUpload)}
+              className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              <Upload size={18} />
+              <span>Change Background</span>
+            </button>
+          )}
+          {onShare && (
+            <button
+              onClick={onShare}
+              className="flex items-center gap-2 px-4 py-2 bg-[#25D366] text-white rounded-lg hover:bg-[#1da851] transition-colors"
+            >
+              <Share2 size={18} />
+              <span>Share WhatsApp</span>
+            </button>
+          )}
+        </div>
+        
+        {showImageUpload && (
+          <div className="absolute top-16 right-4 bg-white p-4 rounded-lg shadow-lg">
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              className="text-sm"
+            />
+          </div>
         )}
       </div>
       
@@ -110,19 +142,7 @@ const HubHeader: React.FC<HubHeaderProps> = ({
                 Library
               </button>
 
-              {isAdmin && (
-                <button
-                  onClick={() => onTabChange('integrations')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-                    activeTab === 'integrations'
-                      ? 'bg-emerald-50 text-emerald-600'
-                      : 'text-gray-500 hover:bg-gray-50'
-                  }`}
-                >
-                  <Plug size={20} />
-                  Integrations
-                </button>
-              )}
+              {/* Integrations tab hidden as requested */}
 
               {isAdmin && (
                 <button

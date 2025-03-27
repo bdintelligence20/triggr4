@@ -1,7 +1,8 @@
 // components/integration/WhatsAppIntegration.tsx
 import React from 'react';
-import { MessageSquare, Copy, Mail, Phone, Share2 } from 'lucide-react';
+import { Copy, Mail, Phone, Share2 } from 'lucide-react';
 import { useAppContext } from '../../contexts/AppContext';
+import WhatsAppIcon from '../icons/WhatsAppIcon';
 
 const WhatsAppIntegration: React.FC = () => {
   const { 
@@ -72,7 +73,7 @@ const WhatsAppIntegration: React.FC = () => {
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
       <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 border-b border-gray-200 dark:border-gray-700">
         <h3 className="font-medium text-gray-900 dark:text-white text-lg flex items-center">
-          <MessageSquare className="text-emerald-500 mr-2" size={20} />
+          <WhatsAppIcon className="mr-2" size={20} />
           WhatsApp Integration
         </h3>
       </div>
@@ -122,7 +123,7 @@ const WhatsAppIntegration: React.FC = () => {
                     onClick={() => shareVia('whatsapp')}
                     className="flex flex-col items-center justify-center text-gray-700 dark:text-gray-300 hover:text-emerald-500 dark:hover:text-emerald-400"
                   >
-                    <MessageSquare size={24} className="mb-1" />
+                    <WhatsAppIcon size={24} className="mb-1" />
                     <span className="text-xs">WhatsApp</span>
                   </button>
                   
@@ -150,7 +151,7 @@ const WhatsAppIntegration: React.FC = () => {
             onClick={generateWhatsappNumber}
             className="w-full flex items-center justify-center px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors"
           >
-            <MessageSquare size={18} className="mr-2" />
+            <WhatsAppIcon size={18} className="mr-2" />
             <span>Generate WhatsApp Number</span>
           </button>
         )}

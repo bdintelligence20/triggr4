@@ -27,10 +27,7 @@ const HubLibrary: React.FC<HubLibraryProps> = ({ hubId }) => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold">Hub Library</h2>
-        <button className="flex items-center gap-2 px-4 py-2 bg-emerald-400 text-white rounded-lg hover:bg-emerald-300">
-          <Plus size={20} />
-          Add Content
-        </button>
+        {/* "Add Content" button removed as requested */}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -48,6 +45,7 @@ const HubLibrary: React.FC<HubLibraryProps> = ({ hubId }) => {
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
             </div>
+            {/* Categories dropdown - Commented out
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
@@ -58,11 +56,14 @@ const HubLibrary: React.FC<HubLibraryProps> = ({ hubId }) => {
               <option value="images">Images</option>
               <option value="videos">Videos</option>
             </select>
+            */}
           </div>
 
-          {/* File Upload Area */}
+          {/* File Upload Area - Centered "Add Knowledge" button */}
           <div className="border-2 border-dashed rounded-lg p-8 text-center transition-colors border-gray-300">
-            <FileUploader />
+            <div className="flex justify-center">
+              <FileUploader />
+            </div>
             <p className="mt-4 text-sm text-gray-600">
               Supported formats: PDF, DOC, DOCX, TXT
             </p>
@@ -107,7 +108,7 @@ const HubLibrary: React.FC<HubLibraryProps> = ({ hubId }) => {
 
         {/* Sidebar */}
         <div className="space-y-6">
-          {/* Categories */}
+          {/* Categories - Commented out
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h3 className="font-medium mb-4">Categories</h3>
             <div className="space-y-2">
@@ -125,8 +126,9 @@ const HubLibrary: React.FC<HubLibraryProps> = ({ hubId }) => {
               </button>
             </div>
           </div>
+          */}
 
-          {/* Storage Usage */}
+          {/* Storage Usage - Commented out
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h3 className="font-medium mb-4">Storage Usage</h3>
             <div className="space-y-4">
@@ -159,6 +161,7 @@ const HubLibrary: React.FC<HubLibraryProps> = ({ hubId }) => {
               </div>
             </div>
           </div>
+          */}
         </div>
       </div>
     </div>

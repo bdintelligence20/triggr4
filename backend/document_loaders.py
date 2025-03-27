@@ -43,7 +43,15 @@ class DocumentLoaderFactory:
             'ppt': UnstructuredPowerPointLoader,
             'xlsx': UnstructuredExcelLoader,
             'xls': UnstructuredExcelLoader,
-            'csv': CSVLoader,
+            'csv': lambda file_path: CSVLoader(
+                file_path=file_path,
+                csv_args={
+                    'delimiter': ',',
+                    'quotechar': '"',
+                    'fieldnames': None,  # Auto-detect headers
+                    'encoding': 'utf-8-sig'  # Handle BOM and common encoding issues
+                }
+            ),
             
             # Email
             'eml': UnstructuredEmailLoader,
@@ -74,11 +82,45 @@ class DocumentLoaderFactory:
     @staticmethod
     def load_document(file_path: str) -> List[Document]:
         """Load a document using the appropriate loader."""
+        file_ext = os.path.splitext(file_path)[1].lower().replace('.', '')
         loader = DocumentLoaderFactory.get_loader(file_path)
+        
         try:
+            # Special handling for CSV files
+            if file_ext == 'csv':
+                try:
+                    import pandas as pd
+                    # Try to read with pandas first to validate CSV structure
+                    df = pd.read_csv(file_path, encoding='utf-8-sig', on_bad_lines='warn')
+                    logger.info(f"CSV validation: {file_path} has {len(df)} rows and {len(df.columns)} columns")
+                except Exception as csv_e:
+                    logger.warning(f"CSV validation failed: {str(csv_e)}. Will attempt with LangChain loader anyway.")
+            
             return loader.load()
         except Exception as e:
             logger.error(f"Error loading document {file_path}: {str(e)}")
+            
+            # For CSV files, provide more detailed error information
+            if file_ext == 'csv':
+                try:
+                    import pandas as pd
+                    # Try different encodings and delimiters as fallback
+                    for encoding in ['utf-8', 'latin1', 'cp1252']:
+                        for delimiter in [',', ';', '\t', '|']:
+                            try:
+                                df = pd.read_csv(file_path, encoding=encoding, sep=delimiter)
+                                content = df.to_string(index=False)
+                                logger.info(f"CSV recovery successful with encoding={encoding}, delimiter={delimiter}")
+                                return [Document(
+                                    page_content=content,
+                                    metadata={"source": file_path, "recovered": True, 
+                                             "encoding": encoding, "delimiter": delimiter}
+                                )]
+                            except:
+                                pass
+                except Exception as recovery_e:
+                    logger.error(f"CSV recovery attempts failed: {str(recovery_e)}")
+            
             # Return empty document with error info
             return [Document(
                 page_content=f"Error loading document: {str(e)}",
