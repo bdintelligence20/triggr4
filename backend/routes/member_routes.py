@@ -381,6 +381,9 @@ def send_whatsapp_verification():
             from twilio.rest import Client
             twilio_client = Client(twilio_account_sid, twilio_auth_token)
             
+            # Get or create a Verify service
+            verify_service_sid = get_or_create_verify_service(twilio_client)
+            
             # Format the phone number (must be E.164 format without the whatsapp: prefix)
             to_number = member_data.get('phone')
             # Remove whatsapp: prefix if present
@@ -394,63 +397,52 @@ def send_whatsapp_verification():
                 org_data = org_doc.to_dict()
                 org_name = org_data.get('name', org_name)
             
-            # Generate a random verification code
-            verification_code = generate_verification_code(6)
-            
-            # Set expiration time (10 minutes from now)
-            expiration_time = datetime.now() + timedelta(minutes=10)
-            
-            # Store the verification code and expiration time in Firestore
-            members_ref.document(member_id).update({
-                'whatsappVerificationSent': True,
-                'whatsappVerificationSentAt': firestore.SERVER_TIMESTAMP,
-                'verificationCode': verification_code,
-                'verificationCodeExpires': expiration_time,
-                'updatedAt': firestore.SERVER_TIMESTAMP,
-                'updatedBy': user_query[0].id
-            })
-            
-            # Send the verification code via WhatsApp using approved template
+            # Send verification via WhatsApp using Verify API
             try:
-                logger.info(f"Sending custom WhatsApp verification to {to_number}")
+                logger.info(f"Sending WhatsApp verification to {to_number} using Verify service {verify_service_sid}")
                 
-                # Get the authentication template SID
-                auth_template_sid = "HXb15ad263eec123a7d5adc9c78670ce5d"  # Template format: "403239 is your verification code. For your security, do not share this code."
+                # Create the verification parameters
+                verification_params = {
+                    'to': to_number,
+                    'channel': 'whatsapp'
+                }
                 
-                # Format the WhatsApp numbers correctly
-                from_number = "+15055787929"  # Use production number directly
-                whatsapp_to = f"whatsapp:{to_number}" if not to_number.startswith('whatsapp:') else to_number
-                whatsapp_from = f"whatsapp:{from_number}"
+                # Log the verification parameters
+                logger.info(f"Verification parameters: {verification_params}")
                 
-                logger.info(f"Using template SID: {auth_template_sid}")
-                logger.info(f"From: {whatsapp_from}, To: {whatsapp_to}")
+                # Create the verification
+                verification = twilio_client.verify.v2.services(verify_service_sid).verifications.create(**verification_params)
                 
-                # Log the verification code for debugging
-                logger.info(f"Sending verification code: {verification_code} (with asterisks for formatting)")
+                # If we get here, the verification was successful
+                logger.info(f"WhatsApp verification sent successfully. SID: {verification.sid}")
                 
-                # Format the verification code with asterisks to match the template
-                # The template expects "*123456* is your verification code"
-                formatted_code = f"*{verification_code}*"
-                
-                # Send the message using the approved template
-                message = twilio_client.messages.create(
-                    content_sid=auth_template_sid,
-                    content_variables=json.dumps({"1": formatted_code}),  # Include asterisks to match template
-                    from_=whatsapp_from,
-                    to=whatsapp_to,
-                    messaging_service_sid=twilio_messaging_service_sid
-                )
-                
-                logger.info(f"WhatsApp verification sent successfully. SID: {message.sid}")
+                # Store verification information in Firestore
+                members_ref.document(member_id).update({
+                    'whatsappVerificationSent': True,
+                    'whatsappVerificationSentAt': firestore.SERVER_TIMESTAMP,
+                    'verificationSid': verification.sid,
+                    'updatedAt': firestore.SERVER_TIMESTAMP,
+                    'updatedBy': user_query[0].id
+                })
                 
                 return jsonify({
                     'memberId': member_id,
                     'status': 'verification_sent',
-                    'messageSid': message.sid
+                    'verificationSid': verification.sid
                 }), 200
                 
             except Exception as e:
                 logger.error(f"Error sending WhatsApp verification: {str(e)}")
+                # Log detailed error information
+                if hasattr(e, 'code'):
+                    logger.error(f"Twilio error code: {e.code}")
+                if hasattr(e, 'msg'):
+                    logger.error(f"Twilio error message: {e.msg}")
+                if hasattr(e, 'status'):
+                    logger.error(f"Twilio error status: {e.status}")
+                if hasattr(e, 'details'):
+                    logger.error(f"Twilio error details: {e.details}")
+                
                 return jsonify({'error': f'Failed to send verification: {str(e)}'}), 500
             
         except Exception as e:
@@ -510,34 +502,81 @@ def verify_whatsapp_code():
         if not member_data.get('whatsappVerificationSent'):
             return jsonify({'error': 'No verification was sent to this member'}), 400
         
-        # Get the stored verification code and expiration time
-        stored_code = member_data.get('verificationCode')
-        expiration_time = member_data.get('verificationCodeExpires')
+        # Get the verification SID
+        verification_sid = member_data.get('verificationSid')
         
-        if not stored_code:
-            return jsonify({'error': 'No verification code found for this member'}), 400
+        if not verification_sid:
+            return jsonify({'error': 'No verification SID found for this member'}), 400
         
-        # Check if the code has expired
-        if expiration_time and datetime.now() > expiration_time:
-            return jsonify({'error': 'Verification code has expired'}), 400
+        # Get Twilio credentials
+        twilio_account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
+        twilio_auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
         
-        # Check if the code matches
-        if verification_code != stored_code:
-            return jsonify({'error': 'Invalid verification code'}), 400
+        if not all([twilio_account_sid, twilio_auth_token]):
+            logger.warning("Twilio credentials not found.")
+            return jsonify({'error': 'Twilio credentials not fully configured'}), 500
         
-        # Mark the member as verified
-        members_ref.document(member_id).update({
-            'whatsappVerified': True,
-            'status': 'active',
-            'verifiedAt': firestore.SERVER_TIMESTAMP,
-            'updatedAt': firestore.SERVER_TIMESTAMP,
-            'updatedBy': user_query[0].id
-        })
-        
-        return jsonify({
-            'memberId': member_id,
-            'status': 'verified'
-        }), 200
+        try:
+            # Initialize Twilio client
+            from twilio.rest import Client
+            twilio_client = Client(twilio_account_sid, twilio_auth_token)
+            
+            # Get the Verify service SID
+            verify_service_sid = get_or_create_verify_service(twilio_client)
+            
+            # Format the phone number (must be E.164 format without the whatsapp: prefix)
+            to_number = member_data.get('phone')
+            # Remove whatsapp: prefix if present
+            if to_number.startswith('whatsapp:'):
+                to_number = to_number[9:]
+            
+            # Check the verification code with Twilio Verify
+            try:
+                logger.info(f"Checking verification code for {to_number}")
+                
+                # Create the verification check
+                verification_check = twilio_client.verify.v2.services(verify_service_sid).verification_checks.create(
+                    to=to_number,
+                    code=verification_code
+                )
+                
+                logger.info(f"Verification check result: {verification_check.status}")
+                
+                # Check if the verification was successful
+                if verification_check.status == "approved":
+                    # Mark the member as verified
+                    members_ref.document(member_id).update({
+                        'whatsappVerified': True,
+                        'status': 'active',
+                        'verifiedAt': firestore.SERVER_TIMESTAMP,
+                        'updatedAt': firestore.SERVER_TIMESTAMP,
+                        'updatedBy': user_query[0].id
+                    })
+                    
+                    return jsonify({
+                        'memberId': member_id,
+                        'status': 'verified'
+                    }), 200
+                else:
+                    return jsonify({'error': f'Verification failed with status: {verification_check.status}'}), 400
+                
+            except Exception as e:
+                logger.error(f"Error checking verification code: {str(e)}")
+                # Log detailed error information
+                if hasattr(e, 'code'):
+                    logger.error(f"Twilio error code: {e.code}")
+                if hasattr(e, 'msg'):
+                    logger.error(f"Twilio error message: {e.msg}")
+                if hasattr(e, 'status'):
+                    logger.error(f"Twilio error status: {e.status}")
+                if hasattr(e, 'details'):
+                    logger.error(f"Twilio error details: {e.details}")
+                
+                return jsonify({'error': f'Failed to check verification code: {str(e)}'}), 500
+            
+        except Exception as e:
+            logger.error(f"Error initializing Twilio client: {str(e)}")
+            return jsonify({'error': f'Failed to initialize Twilio client: {str(e)}'}), 500
         
     except Exception as e:
         logger.error(f"Error verifying code: {str(e)}")
