@@ -430,7 +430,8 @@ def send_whatsapp_verification():
                     content_sid=auth_template_sid,
                     content_variables=json.dumps({"1": verification_code}),
                     from_=whatsapp_from,
-                    to=whatsapp_to
+                    to=whatsapp_to,
+                    messaging_service_sid=twilio_messaging_service_sid
                 )
                 
                 logger.info(f"WhatsApp verification sent successfully. SID: {message.sid}")
