@@ -415,48 +415,20 @@ def send_whatsapp_verification():
                 except Exception as ms_error:
                     logger.warning(f"Error finding WhatsApp messaging service: {str(ms_error)}")
                 
-                # Try different locales to find one that works
-                locales_to_try = ['en_US', 'en_GB', 'en']
-                verification = None
-                last_error = None
+                # Create the verification without specifying locale
+                verification_params = {
+                    'to': to_number,
+                    'channel': 'whatsapp'
+                }
                 
-                for locale in locales_to_try:
-                    try:
-                        # Explicitly specify the channel as "whatsapp" with specific locale
-                        verification_params = {
-                            'to': to_number,
-                            'channel': 'whatsapp',
-                            'locale': locale,
-                        }
-                        
-                        # Log the verification parameters
-                        logger.info(f"Trying verification with locale {locale}. Parameters: {verification_params}")
-                        
-                        # Create the verification
-                        verification = twilio_client.verify.v2.services(verify_service_sid).verifications.create(**verification_params)
-                        
-                        # If we get here, the verification was successful
-                        logger.info(f"WhatsApp verification sent successfully with locale {locale}. SID: {verification.sid}")
-                        break
-                    except Exception as locale_error:
-                        last_error = locale_error
-                        error_message = str(locale_error)
-                        logger.warning(f"Failed to send verification with locale {locale}: {error_message}")
-                        
-                        # If this is not a channel rejection error, don't try other locales
-                        if "63005" not in error_message:
-                            logger.error(f"Encountered non-channel rejection error: {error_message}")
-                            raise locale_error
+                # Log the verification parameters
+                logger.info(f"Verification parameters: {verification_params}")
                 
-                # If all locales failed, raise the last error
-                if verification is None:
-                    if last_error:
-                        logger.error(f"All locales failed. Last error: {str(last_error)}")
-                        raise last_error
-                    else:
-                        raise Exception("Failed to send verification with all locales")
+                # Create the verification
+                verification = twilio_client.verify.v2.services(verify_service_sid).verifications.create(**verification_params)
                 
-                logger.info(f"WhatsApp verification sent. SID: {verification.sid}, Channel: {verification.channel}, Status: {verification.status}")
+                # If we get here, the verification was successful
+                logger.info(f"WhatsApp verification sent successfully. SID: {verification.sid}")
                 
                 # Store verification information in Firestore
                 members_ref.document(member_id).update({
