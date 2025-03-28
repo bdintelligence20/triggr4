@@ -314,6 +314,221 @@ def get_or_create_verify_service(twilio_client):
         logger.error(f"Error creating/updating Verify service: {str(e)}")
         raise
 
+import random
+import string
+from datetime import datetime, timedelta
+
+# Helper function to generate a random verification code
+def generate_verification_code(length=6):
+    """Generate a random numeric verification code of specified length."""
+    return ''.join(random.choices(string.digits, k=length))
+
+# Send WhatsApp verification to a member
+@member_bp.route('/send-verification', methods=['POST'])
+def send_whatsapp_verification():
+    try:
+        # Get the user ID from the request
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        token = auth_header.split(' ')[1]
+        
+        # Get the user from Firestore
+        users_ref = db.collection('users')
+        user_query = users_ref.where('auth_token', '==', token).limit(1).get()
+        
+        if not user_query:
+            return jsonify({'error': 'User not found'}), 404
+        
+        user_data = user_query[0].to_dict()
+        organization_id = user_data.get('organizationId')
+        
+        if not organization_id:
+            return jsonify({'error': 'User does not belong to an organization'}), 400
+        
+        # Get the member ID from the request
+        data = request.json
+        member_id = data.get('memberId')
+        
+        if not member_id:
+            return jsonify({'error': 'Member ID is required'}), 400
+        
+        # Get the member from Firestore
+        members_ref = db.collection('members')
+        member_doc = members_ref.document(member_id).get()
+        
+        if not member_doc.exists:
+            return jsonify({'error': 'Member not found'}), 404
+        
+        member_data = member_doc.to_dict()
+        
+        # Check if the member belongs to the user's organization
+        if member_data.get('organizationId') != organization_id:
+            return jsonify({'error': 'Unauthorized to verify this member'}), 403
+        
+        # Get Twilio credentials
+        twilio_account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
+        twilio_auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
+        twilio_messaging_service_sid = os.environ.get("TWILIO_MESSAGING_SERVICE_SID")
+        
+        if not all([twilio_account_sid, twilio_auth_token, twilio_messaging_service_sid]):
+            logger.warning("Twilio credentials or Messaging Service SID not found.")
+            return jsonify({'error': 'Twilio credentials not fully configured'}), 500
+        
+        try:
+            # Initialize Twilio client
+            from twilio.rest import Client
+            twilio_client = Client(twilio_account_sid, twilio_auth_token)
+            
+            # Format the phone number (must be E.164 format without the whatsapp: prefix)
+            to_number = member_data.get('phone')
+            # Remove whatsapp: prefix if present
+            if to_number.startswith('whatsapp:'):
+                to_number = to_number[9:]
+            
+            # Get organization name
+            org_name = "Knowledge Hub"
+            org_doc = db.collection('organizations').document(organization_id).get()
+            if org_doc.exists:
+                org_data = org_doc.to_dict()
+                org_name = org_data.get('name', org_name)
+            
+            # Generate a random verification code
+            verification_code = generate_verification_code(6)
+            
+            # Set expiration time (10 minutes from now)
+            expiration_time = datetime.now() + timedelta(minutes=10)
+            
+            # Store the verification code and expiration time in Firestore
+            members_ref.document(member_id).update({
+                'whatsappVerificationSent': True,
+                'whatsappVerificationSentAt': firestore.SERVER_TIMESTAMP,
+                'verificationCode': verification_code,
+                'verificationCodeExpires': expiration_time,
+                'updatedAt': firestore.SERVER_TIMESTAMP,
+                'updatedBy': user_query[0].id
+            })
+            
+            # Send the verification code via WhatsApp
+            try:
+                logger.info(f"Sending custom WhatsApp verification to {to_number}")
+                
+                # Format the WhatsApp number with prefix
+                whatsapp_to = f"whatsapp:{to_number}"
+                
+                # Send the message using the approved template format
+                message = twilio_client.messages.create(
+                    from_=f"whatsapp:{os.environ.get('TWILIO_WHATSAPP_FROM', '+15055787929')}",
+                    body=f"{verification_code} is your verification code.",
+                    to=whatsapp_to,
+                    messaging_service_sid=twilio_messaging_service_sid
+                )
+                
+                logger.info(f"WhatsApp verification sent successfully. SID: {message.sid}")
+                
+                return jsonify({
+                    'memberId': member_id,
+                    'status': 'verification_sent',
+                    'messageSid': message.sid
+                }), 200
+                
+            except Exception as e:
+                logger.error(f"Error sending WhatsApp verification: {str(e)}")
+                return jsonify({'error': f'Failed to send verification: {str(e)}'}), 500
+            
+        except Exception as e:
+            logger.error(f"Error initializing Twilio client: {str(e)}")
+            return jsonify({'error': f'Failed to initialize Twilio client: {str(e)}'}), 500
+        
+    except Exception as e:
+        logger.error(f"Error sending verification: {str(e)}")
+        return jsonify({'error': f'Failed to send verification: {str(e)}'}), 500
+
+# Verify a member's WhatsApp verification code
+@member_bp.route('/verify-code', methods=['POST'])
+def verify_whatsapp_code():
+    try:
+        # Get the user ID from the request
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        token = auth_header.split(' ')[1]
+        
+        # Get the user from Firestore
+        users_ref = db.collection('users')
+        user_query = users_ref.where('auth_token', '==', token).limit(1).get()
+        
+        if not user_query:
+            return jsonify({'error': 'User not found'}), 404
+        
+        user_data = user_query[0].to_dict()
+        organization_id = user_data.get('organizationId')
+        
+        if not organization_id:
+            return jsonify({'error': 'User does not belong to an organization'}), 400
+        
+        # Get the verification data from the request
+        data = request.json
+        member_id = data.get('memberId')
+        verification_code = data.get('code')
+        
+        if not member_id or not verification_code:
+            return jsonify({'error': 'Member ID and verification code are required'}), 400
+        
+        # Get the member from Firestore
+        members_ref = db.collection('members')
+        member_doc = members_ref.document(member_id).get()
+        
+        if not member_doc.exists:
+            return jsonify({'error': 'Member not found'}), 404
+        
+        member_data = member_doc.to_dict()
+        
+        # Check if the member belongs to the user's organization
+        if member_data.get('organizationId') != organization_id:
+            return jsonify({'error': 'Unauthorized to verify this member'}), 403
+        
+        # Check if verification was sent
+        if not member_data.get('whatsappVerificationSent'):
+            return jsonify({'error': 'No verification was sent to this member'}), 400
+        
+        # Get the stored verification code and expiration time
+        stored_code = member_data.get('verificationCode')
+        expiration_time = member_data.get('verificationCodeExpires')
+        
+        if not stored_code:
+            return jsonify({'error': 'No verification code found for this member'}), 400
+        
+        # Check if the code has expired
+        if expiration_time and datetime.now() > expiration_time:
+            return jsonify({'error': 'Verification code has expired'}), 400
+        
+        # Check if the code matches
+        if verification_code != stored_code:
+            return jsonify({'error': 'Invalid verification code'}), 400
+        
+        # Mark the member as verified
+        members_ref.document(member_id).update({
+            'whatsappVerified': True,
+            'status': 'active',
+            'verifiedAt': firestore.SERVER_TIMESTAMP,
+            'updatedAt': firestore.SERVER_TIMESTAMP,
+            'updatedBy': user_query[0].id
+        })
+        
+        return jsonify({
+            'memberId': member_id,
+            'status': 'verified'
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error verifying code: {str(e)}")
+        return jsonify({'error': f'Failed to verify code: {str(e)}'}), 500
+
+# Original Verify API implementation (commented out)
+"""
 # Send WhatsApp verification to a member
 @member_bp.route('/send-verification', methods=['POST'])
 def send_whatsapp_verification():
@@ -456,3 +671,4 @@ def send_whatsapp_verification():
     except Exception as e:
         logger.error(f"Error sending verification: {str(e)}")
         return jsonify({'error': f'Failed to send verification: {str(e)}'}), 500
+"""
