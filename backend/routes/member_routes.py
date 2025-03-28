@@ -410,19 +410,27 @@ def send_whatsapp_verification():
                 'updatedBy': user_query[0].id
             })
             
-            # Send the verification code via WhatsApp
+            # Send the verification code via WhatsApp using approved template
             try:
                 logger.info(f"Sending custom WhatsApp verification to {to_number}")
                 
-                # Format the WhatsApp number with prefix
-                whatsapp_to = f"whatsapp:{to_number}"
+                # Get the authentication template SID
+                auth_template_sid = "HX90d975f14f5e9cc4f750f4b4ecf531ed"  # Template name: verify_auto_created
                 
-                # Send the message using the approved template format
+                # Format the WhatsApp numbers correctly
+                from_number = "+15055787929"  # Use production number directly
+                whatsapp_to = f"whatsapp:{to_number}" if not to_number.startswith('whatsapp:') else to_number
+                whatsapp_from = f"whatsapp:{from_number}"
+                
+                logger.info(f"Using template SID: {auth_template_sid}")
+                logger.info(f"From: {whatsapp_from}, To: {whatsapp_to}")
+                
+                # Send the message using the approved template
                 message = twilio_client.messages.create(
-                    from_=f"whatsapp:{os.environ.get('TWILIO_WHATSAPP_FROM', '+15055787929')}",
-                    body=f"{verification_code} is your verification code.",
-                    to=whatsapp_to,
-                    messaging_service_sid=twilio_messaging_service_sid
+                    content_sid=auth_template_sid,
+                    content_variables=json.dumps({"1": verification_code}),
+                    from_=whatsapp_from,
+                    to=whatsapp_to
                 )
                 
                 logger.info(f"WhatsApp verification sent successfully. SID: {message.sid}")
