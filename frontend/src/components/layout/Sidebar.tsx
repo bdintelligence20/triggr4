@@ -62,14 +62,12 @@ const Sidebar: React.FC = () => {
       )}
       
       <aside 
-        className={`w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 ${
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        } fixed z-40 h-[calc(100vh-4rem)]`}
+        className="w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 h-full"
       >
         {/* Sidebar toggle button */}
         <button
           onClick={toggleSidebar}
-          className="absolute -right-10 top-4 bg-white dark:bg-gray-900 p-2 rounded-r-md border border-l-0 border-gray-200 dark:border-gray-700 hidden lg:flex items-center justify-center text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="absolute right-0 translate-x-full top-4 z-50 bg-white dark:bg-gray-900 p-2 rounded-r-md border border-l-0 border-gray-200 dark:border-gray-700 hidden lg:flex items-center justify-center text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
           <ChevronLeft 
             size={20} 
