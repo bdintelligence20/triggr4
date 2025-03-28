@@ -425,10 +425,15 @@ def send_whatsapp_verification():
                 logger.info(f"Using template SID: {auth_template_sid}")
                 logger.info(f"From: {whatsapp_from}, To: {whatsapp_to}")
                 
+                # Log the verification code for debugging
+                logger.info(f"Sending verification code: {verification_code} (without any formatting)")
+                
+                # Ensure the verification code has no formatting characters
+                # The template expects plain text like "123456 is your verification code"
                 # Send the message using the approved template
                 message = twilio_client.messages.create(
                     content_sid=auth_template_sid,
-                    content_variables=json.dumps({"1": verification_code}),
+                    content_variables=json.dumps({"1": verification_code}),  # Plain text, no formatting
                     from_=whatsapp_from,
                     to=whatsapp_to,
                     messaging_service_sid=twilio_messaging_service_sid
