@@ -415,7 +415,7 @@ def send_whatsapp_verification():
                 logger.info(f"Sending custom WhatsApp verification to {to_number}")
                 
                 # Get the authentication template SID
-                auth_template_sid = "HX90d975f14f5e9cc4f750f4b4ecf531ed"  # Template name: verify_auto_created
+                auth_template_sid = "HXb15ad263eec123a7d5adc9c78670ce5d"  # Template format: "403239 is your verification code. For your security, do not share this code."
                 
                 # Format the WhatsApp numbers correctly
                 from_number = "+15055787929"  # Use production number directly
