@@ -700,4 +700,159 @@ def send_bulk_message():
                     
                 except Exception as e:
                     logger.error(f"Error sending WhatsApp message to {phone_number}: {str(e)}")
-                    results.appen
+                    results.append({
+                        'memberId': member_id,
+                        'status': 'failed',
+                        'phone': phone_number,
+                        'error': str(e)
+                    })
+                    failed_count += 1
+            except Exception as e:
+                logger.error(f"Error processing member {member_id}: {str(e)}")
+                results.append({
+                    'memberId': member_id,
+                    'status': 'failed',
+                    'error': str(e)
+                })
+                failed_count += 1
+        
+        # Update the broadcast status
+        db.collection('broadcasts').document(broadcast_id).update({
+            'status': 'completed',
+            'completedAt': firestore.SERVER_TIMESTAMP,
+            'stats': {
+                'success': success_count,
+                'failed': failed_count,
+                'total': len(member_ids)
+            }
+        })
+        
+        return jsonify({
+            'success': True,
+            'broadcastId': broadcast_id,
+            'stats': {
+                'success': success_count,
+                'failed': failed_count,
+                'total': len(member_ids)
+            },
+            'results': results
+        })
+    except Exception as e:
+        logger.error(f"Error sending bulk message: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# WhatsApp webhook handler
+@whatsapp_bp.route('/webhook', methods=['POST'])
+def webhook():
+    """Handle incoming WhatsApp messages."""
+    try:
+        # Get the message data
+        form_data = request.form.to_dict()
+        
+        # Log the incoming message
+        logger.info(f"Received WhatsApp message: {form_data}")
+        
+        # Get the message body and sender
+        message_body = form_data.get('Body', '').strip()
+        from_number = form_data.get('From', '')
+        
+        if not message_body or not from_number:
+            logger.warning("Missing message body or sender number")
+            return create_twilio_response("Sorry, we couldn't process your message.")
+        
+        # Check if this is a verification code
+        verification_response = handle_verification_code(from_number, message_body)
+        if verification_response:
+            return verification_response
+        
+        # Get the member by phone number
+        member = get_member_by_phone(from_number)
+        
+        if not member:
+            logger.warning(f"No member found for phone number: {from_number}")
+            return create_twilio_response("❌ Your number is not registered in our system. Please contact your organization administrator.")
+        
+        # Check if the member is verified
+        if not member.get('whatsappVerified'):
+            logger.warning(f"Member {member['id']} with phone {from_number} is not verified")
+            return create_twilio_response("❌ Your WhatsApp number is not verified. Please contact your organization administrator.")
+        
+        # Get the organization ID
+        organization_id = member.get('organizationId')
+        
+        if not organization_id:
+            logger.warning(f"Member {member['id']} does not belong to an organization")
+            return create_twilio_response("❌ You are not associated with any organization. Please contact your administrator.")
+        
+        # Initialize RAG system
+        rag = RAGSystem(
+            openai_api_key=OPENAI_API_KEY,
+            anthropic_api_key=ANTHROPIC_API_KEY,
+            pinecone_api_key=PINECONE_API_KEY,
+            pinecone_index_name=PINECONE_INDEX_NAME
+        )
+        
+        # Query the knowledge base
+        try:
+            # Log the query
+            logger.info(f"Querying knowledge base for member {member['id']} with query: {message_body}")
+            
+            # Add the query to the member's history
+            query_id = str(uuid.uuid4())
+            query_data = {
+                'memberId': member['id'],
+                'organizationId': organization_id,
+                'query': message_body,
+                'source': 'whatsapp',
+                'createdAt': firestore.SERVER_TIMESTAMP,
+                'status': 'processing'
+            }
+            
+            db.collection('queries').document(query_id).set(query_data)
+            
+            # Query the knowledge base with organization filter
+            response = rag.query(
+                query=message_body,
+                organization_id=organization_id,
+                user_id=member['id']
+            )
+            
+            # Sanitize the response for WhatsApp
+            sanitized_response = sanitize_ai_response(response.get('answer', ''))
+            
+            # Update the query with the response
+            db.collection('queries').document(query_id).update({
+                'response': response.get('answer', ''),
+                'sources': response.get('sources', []),
+                'status': 'completed',
+                'completedAt': firestore.SERVER_TIMESTAMP
+            })
+            
+            # Try to send the response using a template
+            try:
+                logger.info(f"Sending template response to {from_number}")
+                return send_whatsapp_template_message(
+                    to_number=from_number,
+                    content_sid=TEMPLATE_CONTENT_SID,
+                    content_variables={"1": sanitized_response}
+                )
+            except Exception as e:
+                logger.error(f"Error sending template response: {str(e)}")
+                # Fall back to direct message
+                return send_whatsapp_message(from_number, sanitized_response)
+                
+        except Exception as e:
+            logger.error(f"Error querying knowledge base: {str(e)}")
+            
+            # Update the query with the error
+            db.collection('queries').document(query_id).update({
+                'status': 'failed',
+                'error': str(e),
+                'completedAt': firestore.SERVER_TIMESTAMP
+            })
+            
+            return create_twilio_response("❌ Sorry, we couldn't process your query. Please try again later or contact your administrator.")
+    
+    except Exception as e:
+        logger.error(f"Error handling WhatsApp webhook: {str(e)}")
+        return create_twilio_response("❌ An error occurred. Please try again later.")
