@@ -30,8 +30,9 @@ TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "+15055787929")
 TWILIO_MESSAGING_SERVICE_SID = os.environ.get("TWILIO_MESSAGING_SERVICE_SID")
 
-# Approved Content Template SID for the AI answer (template body: "Hi! Here is your answer: {{1}}")
-TEMPLATE_CONTENT_SID = "HX6ed39c2507e07cb25c75412d74f134d8"  # Template name: copy_ai_response
+# Approved Content Template SIDs
+TEMPLATE_CONTENT_SID = "HX6ed39c2507e07cb25c75412d74f134d8"  # Template name: copy_ai_response (body: "Hi! Here is your answer: {{1}}")
+VERIFICATION_TEMPLATE_SID = "HX04cab39d2e6c1bf04d2b09754bed90a9"  # Template for verification messages (body: "Your WhatsApp number has been verified successfully! You can now query the knowledge base for {{1}}. Try asking a question!")
 
 # Default friendly name for the Conversations Service
 CONVERSATIONS_SERVICE_NAME = "Knowledge Hub Conversations"
@@ -64,6 +65,21 @@ def send_templated_whatsapp_response(to_number, message):
         logger.error(f"Error sending templated message: {str(e)}")
         # Fall back to direct message as a last resort
         return send_whatsapp_message(to_number, sanitized_message)
+
+def send_verification_whatsapp_response(to_number, org_name):
+    """Send a WhatsApp verification message using the dedicated verification template."""
+    logger.info(f"Sending verification message to {to_number} with org name: {org_name}")
+    try:
+        return send_whatsapp_template_message(
+            to_number=to_number,
+            content_sid=VERIFICATION_TEMPLATE_SID,
+            content_variables={"1": org_name}
+        )
+    except Exception as e:
+        logger.error(f"Error sending verification message: {str(e)}")
+        # Fall back to direct message as a last resort
+        message = f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!"
+        return send_whatsapp_message(to_number, message)
 
 def send_whatsapp_message(to_number, message_body):
     """
@@ -472,9 +488,8 @@ def handle_verification_code(from_number, message):
                 
                 logger.info(f"WhatsApp verification successful for member {member_id}")
                 
-                # Return success response
-                success_message = f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!"
-                return send_templated_whatsapp_response(from_number, success_message)
+                # Return success response using the verification template
+                return send_verification_whatsapp_response(from_number, org_name)
             else:
                 logger.warning(f"Invalid verification code for {phone_number}. Status: {verification_check.status}")
                 return send_templated_whatsapp_response(from_number, "Invalid verification code. Please try again or contact your organization administrator.")
@@ -521,9 +536,8 @@ def handle_verification_code(from_number, message):
             
             logger.info(f"WhatsApp verification successful for member {member_id} (fallback)")
             
-            # Return success response
-            success_message = f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!"
-            return send_templated_whatsapp_response(from_number, success_message)
+            # Return success response using the verification template
+            return send_verification_whatsapp_response(from_number, org_name)
     except Exception as e:
         logger.error(f"Error verifying WhatsApp: {str(e)}")
         return send_templated_whatsapp_response(from_number, "An error occurred during verification. Please try again later.")
