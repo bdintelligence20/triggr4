@@ -51,6 +51,20 @@ def create_twilio_response(message):
         resp.message(message)
     return str(resp)
 
+def send_templated_whatsapp_response(to_number, message):
+    """Send a WhatsApp message using the approved template."""
+    sanitized_message = sanitize_ai_response(message)
+    try:
+        return send_whatsapp_template_message(
+            to_number=to_number,
+            content_sid=TEMPLATE_CONTENT_SID,
+            content_variables={"1": sanitized_message}
+        )
+    except Exception as e:
+        logger.error(f"Error sending templated message: {str(e)}")
+        # Fall back to direct message as a last resort
+        return send_whatsapp_message(to_number, sanitized_message)
+
 def send_whatsapp_message(to_number, message_body):
     """
     Sends a WhatsApp message using the Twilio client.
@@ -274,10 +288,26 @@ def create_member_conversation(twilio_client, member_id, phone_number, org_name)
         # Send a welcome message
         try:
             welcome_message = f"Welcome to the {org_name} Knowledge Hub! You can ask questions about your organization's knowledge base here."
-            twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation.sid).messages.create(
-                author="system",
-                body=welcome_message
-            )
+            
+            # First try to send via template
+            try:
+                # We need to get the participant's address to send the templated message
+                participants = twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation.sid).participants.list()
+                for participant in participants:
+                    if hasattr(participant, 'messaging_binding') and participant.messaging_binding.get('address', '').startswith('whatsapp:'):
+                        participant_address = participant.messaging_binding.get('address')
+                        # Send templated welcome message
+                        send_templated_whatsapp_response(participant_address, welcome_message)
+                        logger.info(f"Sent templated welcome message to {participant_address}")
+                        break
+            except Exception as template_error:
+                logger.error(f"Error sending templated welcome message: {str(template_error)}")
+                # Fall back to conversation message
+                twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation.sid).messages.create(
+                    author="system",
+                    body=welcome_message
+                )
+                logger.info(f"Sent fallback welcome message to conversation {conversation.sid}")
             
             logger.info(f"Sent welcome message to conversation {conversation.sid}")
         except Exception as e:
@@ -364,7 +394,7 @@ def handle_verification_code(from_number, message):
     members = list(members_ref.stream())
     
     if not members:
-        return create_twilio_response("❌ Your number is not registered in our system. Please contact your organization administrator.")
+        return send_templated_whatsapp_response(from_number, "Your number is not registered in our system. Please contact your organization administrator.")
     
     member_doc = members[0]
     member_data = member_doc.to_dict()
@@ -372,12 +402,12 @@ def handle_verification_code(from_number, message):
     # Check if already verified
     if member_data.get('whatsappVerified'):
         logger.info(f"Phone number {phone_number} is already verified")
-        return create_twilio_response("✅ Your WhatsApp number is already verified. You can start querying the knowledge base.")
+        return send_templated_whatsapp_response(from_number, "Your WhatsApp number is already verified. You can start querying the knowledge base.")
     
     # Check if verification was sent via SMS
     if not member_data.get('smsVerificationSent'):
         logger.warning(f"No SMS verification was sent to {phone_number} but received code: {verification_code}")
-        return create_twilio_response("❌ No verification was requested for this number. Please contact your organization administrator.")
+        return send_templated_whatsapp_response(from_number, "No verification was requested for this number. Please contact your organization administrator.")
     
     # Get Twilio credentials
     twilio_account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
@@ -386,7 +416,7 @@ def handle_verification_code(from_number, message):
     
     if not all([twilio_account_sid, twilio_auth_token, twilio_messaging_service_sid]):
         logger.error("Twilio credentials or Messaging Service SID not found.")
-        return create_twilio_response("❌ An error occurred during verification. Please try again later.")
+        return send_templated_whatsapp_response(from_number, "An error occurred during verification. Please try again later.")
     
     try:
         # Initialize Twilio client
@@ -443,10 +473,11 @@ def handle_verification_code(from_number, message):
                 logger.info(f"WhatsApp verification successful for member {member_id}")
                 
                 # Return success response
-                return create_twilio_response(f"✅ Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!")
+                success_message = f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!"
+                return send_templated_whatsapp_response(from_number, success_message)
             else:
                 logger.warning(f"Invalid verification code for {phone_number}. Status: {verification_check.status}")
-                return create_twilio_response("❌ Invalid verification code. Please try again or contact your organization administrator.")
+                return send_templated_whatsapp_response(from_number, "Invalid verification code. Please try again or contact your organization administrator.")
         except Exception as e:
             logger.error(f"Error checking verification code: {str(e)}")
             
@@ -491,10 +522,11 @@ def handle_verification_code(from_number, message):
             logger.info(f"WhatsApp verification successful for member {member_id} (fallback)")
             
             # Return success response
-            return create_twilio_response(f"✅ Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!")
+            success_message = f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!"
+            return send_templated_whatsapp_response(from_number, success_message)
     except Exception as e:
         logger.error(f"Error verifying WhatsApp: {str(e)}")
-        return create_twilio_response("❌ An error occurred during verification. Please try again later.")
+        return send_templated_whatsapp_response(from_number, "An error occurred during verification. Please try again later.")
 
 # Send bulk WhatsApp messages to members
 @whatsapp_bp.route('/send-bulk-message', methods=['POST'])
@@ -644,7 +676,7 @@ def send_bulk_message():
                             logger.error(f"Error creating conversation for member {member_id}: {str(e)}")
                             # Fall back to direct messaging if conversation creation fails
                             logger.info(f"Falling back to direct messaging for {phone_number}")
-                            send_whatsapp_message(phone_number, personalized_message)
+                            send_templated_whatsapp_response(phone_number, personalized_message)
                             
                             # Record the successful delivery
                             results.append({
@@ -673,7 +705,7 @@ def send_bulk_message():
                         logger.error(f"Error sending message via Conversations API: {str(e)}")
                         # Fall back to direct messaging if Conversations API fails
                         logger.info(f"Falling back to direct messaging for {phone_number}")
-                        send_whatsapp_message(phone_number, personalized_message)
+                        send_templated_whatsapp_response(phone_number, personalized_message)
                         
                         # Record the successful delivery
                         results.append({
@@ -758,7 +790,7 @@ def webhook():
         
         if not message_body or not from_number:
             logger.warning("Missing message body or sender number")
-            return create_twilio_response("Sorry, we couldn't process your message.")
+            return send_templated_whatsapp_response(from_number, "Sorry, we couldn't process your message.")
         
         # Check if this is a verification code
         verification_response = handle_verification_code(from_number, message_body)
@@ -770,19 +802,19 @@ def webhook():
         
         if not member:
             logger.warning(f"No member found for phone number: {from_number}")
-            return create_twilio_response("❌ Your number is not registered in our system. Please contact your organization administrator.")
+            return send_templated_whatsapp_response(from_number, "Your number is not registered in our system. Please contact your organization administrator.")
         
         # Check if the member is verified
         if not member.get('whatsappVerified'):
             logger.warning(f"Member {member['id']} with phone {from_number} is not verified")
-            return create_twilio_response("❌ Your WhatsApp number is not verified. Please contact your organization administrator.")
+            return send_templated_whatsapp_response(from_number, "Your WhatsApp number is not verified. Please contact your organization administrator.")
         
         # Get the organization ID
         organization_id = member.get('organizationId')
         
         if not organization_id:
             logger.warning(f"Member {member['id']} does not belong to an organization")
-            return create_twilio_response("❌ You are not associated with any organization. Please contact your administrator.")
+            return send_templated_whatsapp_response(from_number, "You are not associated with any organization. Please contact your administrator.")
         
         # Initialize RAG system
         rag = RAGSystem(
@@ -851,8 +883,8 @@ def webhook():
                 'completedAt': firestore.SERVER_TIMESTAMP
             })
             
-            return create_twilio_response("❌ Sorry, we couldn't process your query. Please try again later or contact your administrator.")
+            return send_templated_whatsapp_response(from_number, "Sorry, we couldn't process your query. Please try again later or contact your administrator.")
     
     except Exception as e:
         logger.error(f"Error handling WhatsApp webhook: {str(e)}")
-        return create_twilio_response("❌ An error occurred. Please try again later.")
+        return send_templated_whatsapp_response(from_number, "An error occurred. Please try again later.")
