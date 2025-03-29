@@ -86,14 +86,31 @@ const WhatsAppIntegration: React.FC = () => {
         <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg mb-6 text-sm">
           <h4 className="font-medium text-blue-700 dark:text-blue-300 mb-2">New: Enhanced WhatsApp Integration</h4>
           <p className="text-gray-600 dark:text-gray-400 mb-2">
-            We've upgraded our WhatsApp integration to use Twilio Conversations API for improved reliability and features:
+            We've upgraded our WhatsApp integration with two key improvements:
+          </p>
+          
+          <h5 className="font-medium text-blue-600 dark:text-blue-400 mt-3 mb-1">1. SMS Verification</h5>
+          <p className="text-gray-600 dark:text-gray-400 mb-2">
+            Members now verify their accounts via SMS for improved reliability:
+          </p>
+          <ul className="list-disc pl-5 text-gray-600 dark:text-gray-400 mb-2">
+            <li>Higher verification success rate</li>
+            <li>Simplified user experience</li>
+            <li>Members receive a verification code via SMS</li>
+            <li>They send the code to the WhatsApp number to complete verification</li>
+          </ul>
+          
+          <h5 className="font-medium text-blue-600 dark:text-blue-400 mt-3 mb-1">2. Conversations API</h5>
+          <p className="text-gray-600 dark:text-gray-400 mb-2">
+            We now use Twilio Conversations API for improved messaging:
           </p>
           <ul className="list-disc pl-5 text-gray-600 dark:text-gray-400 mb-2">
             <li>More reliable message delivery</li>
             <li>Better handling of markdown and special characters</li>
             <li>Improved conversation history</li>
           </ul>
-          <p className="text-gray-600 dark:text-gray-400 mb-2">
+          
+          <p className="text-gray-600 dark:text-gray-400 mt-3 mb-2">
             <strong>Setup Instructions:</strong> Configure your Twilio account to use the Conversations webhook:
           </p>
           <ol className="list-decimal pl-5 text-gray-600 dark:text-gray-400">

@@ -397,14 +397,14 @@ def send_whatsapp_verification():
                 org_data = org_doc.to_dict()
                 org_name = org_data.get('name', org_name)
             
-            # Send verification via WhatsApp using Verify API
+            # Send verification via SMS using Verify API
             try:
-                logger.info(f"Sending WhatsApp verification to {to_number} using Verify service {verify_service_sid}")
+                logger.info(f"Sending SMS verification to {to_number} using Verify service {verify_service_sid}")
                 
                 # Create the verification parameters
                 verification_params = {
                     'to': to_number,
-                    'channel': 'whatsapp'
+                    'channel': 'sms'
                 }
                 
                 # Log the verification parameters
@@ -414,12 +414,12 @@ def send_whatsapp_verification():
                 verification = twilio_client.verify.v2.services(verify_service_sid).verifications.create(**verification_params)
                 
                 # If we get here, the verification was successful
-                logger.info(f"WhatsApp verification sent successfully. SID: {verification.sid}")
+                logger.info(f"SMS verification sent successfully. SID: {verification.sid}")
                 
                 # Store verification information in Firestore
                 members_ref.document(member_id).update({
-                    'whatsappVerificationSent': True,
-                    'whatsappVerificationSentAt': firestore.SERVER_TIMESTAMP,
+                    'smsVerificationSent': True,
+                    'smsVerificationSentAt': firestore.SERVER_TIMESTAMP,
                     'verificationSid': verification.sid,
                     'updatedAt': firestore.SERVER_TIMESTAMP,
                     'updatedBy': user_query[0].id
@@ -432,7 +432,7 @@ def send_whatsapp_verification():
                 }), 200
                 
             except Exception as e:
-                logger.error(f"Error sending WhatsApp verification: {str(e)}")
+                logger.error(f"Error sending SMS verification: {str(e)}")
                 # Log detailed error information
                 if hasattr(e, 'code'):
                     logger.error(f"Twilio error code: {e.code}")
@@ -443,7 +443,7 @@ def send_whatsapp_verification():
                 if hasattr(e, 'details'):
                     logger.error(f"Twilio error details: {e.details}")
                 
-                return jsonify({'error': f'Failed to send verification: {str(e)}'}), 500
+                return jsonify({'error': f'Failed to send SMS verification: {str(e)}'}), 500
             
         except Exception as e:
             logger.error(f"Error initializing Twilio client: {str(e)}")
@@ -499,7 +499,7 @@ def verify_whatsapp_code():
             return jsonify({'error': 'Unauthorized to verify this member'}), 403
         
         # Check if verification was sent
-        if not member_data.get('whatsappVerificationSent'):
+        if not member_data.get('smsVerificationSent'):
             return jsonify({'error': 'No verification was sent to this member'}), 400
         
         # Get the verification SID
@@ -546,7 +546,8 @@ def verify_whatsapp_code():
                 if verification_check.status == "approved":
                     # Mark the member as verified
                     members_ref.document(member_id).update({
-                        'whatsappVerified': True,
+                        'whatsappVerified': True,  # Keep this for backward compatibility
+                        'smsVerified': True,
                         'status': 'active',
                         'verifiedAt': firestore.SERVER_TIMESTAMP,
                         'updatedAt': firestore.SERVER_TIMESTAMP,

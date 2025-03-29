@@ -374,9 +374,9 @@ def handle_verification_code(from_number, message):
         logger.info(f"Phone number {phone_number} is already verified")
         return create_twilio_response("✅ Your WhatsApp number is already verified. You can start querying the knowledge base.")
     
-    # Check if verification was sent
-    if not member_data.get('whatsappVerificationSent'):
-        logger.warning(f"No verification was sent to {phone_number} but received code: {verification_code}")
+    # Check if verification was sent via SMS
+    if not member_data.get('smsVerificationSent'):
+        logger.warning(f"No SMS verification was sent to {phone_number} but received code: {verification_code}")
         return create_twilio_response("❌ No verification was requested for this number. Please contact your organization administrator.")
     
     # Get Twilio credentials
