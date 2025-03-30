@@ -36,6 +36,8 @@ VERIFICATION_TEMPLATE_SID = "HX49a2a0f54d02996525960683dce1020b"  # Template for
 
 # Default friendly name for the Conversations Service
 CONVERSATIONS_SERVICE_NAME = "Knowledge Hub Conversations"
+# Conversations Service SID (provided by user)
+CONVERSATIONS_SERVICE_SID = "ISe0f96fba94ed42c9a94d5ffaabef467e"
 
 # Initialize Twilio client
 try:
@@ -66,24 +68,39 @@ def send_templated_whatsapp_response(to_number, message):
         # Fall back to direct message as a last resort
         return send_whatsapp_message(to_number, sanitized_message)
 
-def send_verification_whatsapp_response(to_number, org_name):
-    """Send a WhatsApp verification message using the dedicated verification template."""
+def send_verification_whatsapp_response(to_number, org_name, conversation_sid=None):
+    """
+    Send a WhatsApp verification message using the Conversations API.
+    This bypasses the template restrictions by using the Conversations API directly.
+    """
     logger.info(f"Sending verification message to {to_number} with org name: {org_name}")
-    logger.info(f"Using verification template SID: {VERIFICATION_TEMPLATE_SID}")
-    logger.info(f"Organization name (unsanitized): {org_name}")
+    logger.info(f"Using Conversations API instead of templates")
+    
+    # Prepare the verification message
+    verification_message = f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!"
     
     try:
-        # Pass org_name directly without sanitization
-        return send_whatsapp_template_message(
-            to_number=to_number,
-            content_sid=VERIFICATION_TEMPLATE_SID,
-            content_variables={"1": org_name}
-        )
+        # If we have a conversation SID, use it
+        if conversation_sid:
+            logger.info(f"Using existing conversation {conversation_sid} for verification message")
+            try:
+                # Send message via Conversations API
+                message_sid = send_conversation_message(twilio_client, conversation_sid, verification_message)
+                logger.info(f"Verification message sent via Conversations API. Message SID: {message_sid}")
+                return create_twilio_response("")
+            except Exception as e:
+                logger.error(f"Error sending verification message via Conversations API: {str(e)}")
+                # Fall back to direct message
+                logger.info(f"Falling back to direct message for verification")
+                return send_whatsapp_message(to_number, verification_message)
+        else:
+            # No conversation SID, send direct message
+            logger.info(f"No conversation SID provided, sending direct message for verification")
+            return send_whatsapp_message(to_number, verification_message)
     except Exception as e:
         logger.error(f"Error sending verification message: {str(e)}")
         # Fall back to direct message as a last resort
-        message = f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name} resources. Try asking a question!"
-        return send_whatsapp_message(to_number, message)
+        return send_whatsapp_message(to_number, verification_message)
 
 def send_whatsapp_message(to_number, message_body):
     """
@@ -272,8 +289,8 @@ def get_or_create_conversations_service(twilio_client):
 def create_member_conversation(twilio_client, member_id, phone_number, org_name):
     """Create a new conversation for a verified member."""
     try:
-        # Get or create a Conversations service
-        conversations_service_sid = get_or_create_conversations_service(twilio_client)
+        # Use the hardcoded Conversations Service SID
+        conversations_service_sid = CONVERSATIONS_SERVICE_SID
         
         # Create a unique conversation friendly name
         friendly_name = f"Member {member_id} - {phone_number}"
@@ -381,10 +398,8 @@ def sanitize_ai_response(text):
 def send_conversation_message(twilio_client, conversation_sid, message, author="system"):
     """Send a message to a conversation."""
     try:
-        # Get the Conversations service SID
-        conversations_service_sid = os.environ.get("TWILIO_CONVERSATIONS_SERVICE_SID")
-        if not conversations_service_sid:
-            conversations_service_sid = get_or_create_conversations_service(twilio_client)
+        # Use the hardcoded Conversations Service SID
+        conversations_service_sid = CONVERSATIONS_SERVICE_SID
         
         # Send the message
         message = twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation_sid).messages.create(
@@ -497,8 +512,8 @@ def handle_verification_code(from_number, message):
                 
                 logger.info(f"WhatsApp verification successful for member {member_id}")
                 
-                # Return success response using the verification template
-                return send_verification_whatsapp_response(from_number, org_name)
+                # Return success response using the Conversations API
+                return send_verification_whatsapp_response(from_number, org_name, conversation_sid)
             else:
                 logger.warning(f"Invalid verification code for {phone_number}. Status: {verification_check.status}")
                 return send_templated_whatsapp_response(from_number, "Invalid verification code. Please try again or contact your organization administrator.")
@@ -545,8 +560,8 @@ def handle_verification_code(from_number, message):
             
             logger.info(f"WhatsApp verification successful for member {member_id} (fallback)")
             
-            # Return success response using the verification template
-            return send_verification_whatsapp_response(from_number, org_name)
+            # Return success response using the Conversations API
+            return send_verification_whatsapp_response(from_number, org_name, conversation_sid)
     except Exception as e:
         logger.error(f"Error verifying WhatsApp: {str(e)}")
         return send_templated_whatsapp_response(from_number, "An error occurred during verification. Please try again later.")
@@ -883,18 +898,44 @@ def webhook():
                 'completedAt': firestore.SERVER_TIMESTAMP
             })
             
-            # Try to send the response using a template
-            try:
-                logger.info(f"Sending template response to {from_number}")
-                return send_whatsapp_template_message(
-                    to_number=from_number,
-                    content_sid=TEMPLATE_CONTENT_SID,
-                    content_variables={"1": sanitized_response}
-                )
-            except Exception as e:
-                logger.error(f"Error sending template response: {str(e)}")
-                # Fall back to direct message
-                return send_whatsapp_message(from_number, sanitized_response)
+            # Get the conversation SID if it exists
+            conversation_sid = member.get('conversationSid')
+            
+            # Try to send the response using the Conversations API
+            if conversation_sid:
+                try:
+                    logger.info(f"Sending AI response via Conversations API to {from_number}")
+                    message_sid = send_conversation_message(twilio_client, conversation_sid, response.get('answer', ''))
+                    logger.info(f"AI response sent via Conversations API. Message SID: {message_sid}")
+                    return create_twilio_response("")
+                except Exception as e:
+                    logger.error(f"Error sending AI response via Conversations API: {str(e)}")
+                    # Fall back to template message
+                    logger.info(f"Falling back to template message for AI response")
+                    try:
+                        logger.info(f"Sending template response to {from_number}")
+                        return send_whatsapp_template_message(
+                            to_number=from_number,
+                            content_sid=TEMPLATE_CONTENT_SID,
+                            content_variables={"1": sanitized_response}
+                        )
+                    except Exception as template_error:
+                        logger.error(f"Error sending template response: {str(template_error)}")
+                        # Fall back to direct message as a last resort
+                        return send_whatsapp_message(from_number, sanitized_response)
+            else:
+                # No conversation exists, try template message
+                try:
+                    logger.info(f"No conversation found, sending template response to {from_number}")
+                    return send_whatsapp_template_message(
+                        to_number=from_number,
+                        content_sid=TEMPLATE_CONTENT_SID,
+                        content_variables={"1": sanitized_response}
+                    )
+                except Exception as e:
+                    logger.error(f"Error sending template response: {str(e)}")
+                    # Fall back to direct message
+                    return send_whatsapp_message(from_number, sanitized_response)
                 
         except Exception as e:
             logger.error(f"Error querying knowledge base: {str(e)}")
