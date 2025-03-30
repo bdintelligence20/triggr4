@@ -70,37 +70,51 @@ def send_templated_whatsapp_response(to_number, message):
 
 def send_verification_whatsapp_response(to_number, org_name, conversation_sid=None):
     """
-    Send a WhatsApp verification message using the Conversations API.
-    This bypasses the template restrictions by using the Conversations API directly.
+    Send a WhatsApp verification message using the approved verification template.
+    If a conversation SID is provided, also add the message to the conversation for record-keeping.
     """
     logger.info(f"Sending verification message to {to_number} with org name: {org_name}")
-    logger.info(f"Using Conversations API instead of templates")
-    
-    # Prepare the verification message
-    verification_message = f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!"
     
     try:
-        # If we have a conversation SID, use it
+        # If we have a conversation SID, add the message to the conversation for record-keeping
         if conversation_sid:
             logger.info(f"Using existing conversation {conversation_sid} for verification message")
             try:
-                # Send message via Conversations API
-                message_sid = send_conversation_message(twilio_client, conversation_sid, verification_message)
-                logger.info(f"Verification message sent via Conversations API. Message SID: {message_sid}")
-                return create_twilio_response("")
+                # Prepare the verification message
+                verification_message = f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!"
+                
+                # Add the message to the conversation for record-keeping
+                conversation_message = twilio_client.conversations.v1.services(CONVERSATIONS_SERVICE_SID).conversations(conversation_sid).messages.create(
+                    author="system",
+                    body=verification_message
+                )
+                logger.info(f"Added verification message to conversation {conversation_sid}, message SID: {conversation_message.sid}")
             except Exception as e:
-                logger.error(f"Error sending verification message via Conversations API: {str(e)}")
-                # Fall back to direct message
-                logger.info(f"Falling back to direct message for verification")
-                return send_whatsapp_message(to_number, verification_message)
-        else:
-            # No conversation SID, send direct message
-            logger.info(f"No conversation SID provided, sending direct message for verification")
-            return send_whatsapp_message(to_number, verification_message)
+                logger.error(f"Error adding verification message to conversation: {str(e)}")
+                # Continue even if adding to conversation fails
+        
+        # Send the verification message using the approved template
+        logger.info(f"Sending verification template message to {to_number}")
+        try:
+            return send_whatsapp_template_message(
+                to_number=to_number,
+                content_sid=VERIFICATION_TEMPLATE_SID,
+                content_variables={"1": org_name}
+            )
+        except Exception as template_error:
+            logger.error(f"Error sending verification template: {str(template_error)}")
+            # Fall back to general template as a second attempt
+            try:
+                verification_message = f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!"
+                return send_templated_whatsapp_response(to_number, verification_message)
+            except Exception as e:
+                logger.error(f"Error sending fallback template: {str(e)}")
+                # Fall back to direct message as a last resort
+                return send_whatsapp_message(to_number, f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!")
     except Exception as e:
         logger.error(f"Error sending verification message: {str(e)}")
         # Fall back to direct message as a last resort
-        return send_whatsapp_message(to_number, verification_message)
+        return send_whatsapp_message(to_number, f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!")
 
 def send_whatsapp_message(to_number, message_body):
     """
@@ -449,20 +463,55 @@ def sanitize_ai_response(text):
     # Ensure there are no leading/trailing whitespaces
     return text.strip()
 
-def send_conversation_message(twilio_client, conversation_sid, message, author="system"):
-    """Send a message to a conversation."""
+def send_conversation_message(twilio_client, conversation_sid, message_body, author="system"):
+    """
+    Send a message to a conversation.
+    
+    This function adds the message to the conversation, but for WhatsApp delivery,
+    we need to use templates. So we'll:
+    1. Add the message to the conversation for record-keeping
+    2. Get the participant's WhatsApp address
+    3. Send the templated message directly to the participant
+    """
     try:
         # Use the hardcoded Conversations Service SID
         conversations_service_sid = CONVERSATIONS_SERVICE_SID
         
-        # Send the message
-        message = twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation_sid).messages.create(
+        # First, add the message to the conversation for record-keeping
+        conversation_message = twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation_sid).messages.create(
             author=author,
-            body=message
+            body=message_body
         )
         
-        logger.info(f"Sent message to conversation {conversation_sid}, message SID: {message.sid}")
-        return message.sid
+        logger.info(f"Added message to conversation {conversation_sid}, message SID: {conversation_message.sid}")
+        
+        # Now, get the participant's WhatsApp address to send the templated message
+        try:
+            # Get all participants in the conversation
+            participants = twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation_sid).participants.list()
+            
+            # Find the WhatsApp participant (not the system)
+            whatsapp_participant = None
+            for participant in participants:
+                if hasattr(participant, 'messaging_binding') and participant.messaging_binding.get('address', '').startswith('whatsapp:'):
+                    whatsapp_participant = participant
+                    break
+            
+            if whatsapp_participant:
+                # Get the participant's WhatsApp address
+                whatsapp_address = whatsapp_participant.messaging_binding.get('address')
+                logger.info(f"Found WhatsApp participant with address: {whatsapp_address}")
+                
+                # Send the templated message directly to the participant
+                logger.info(f"Sending templated message to {whatsapp_address}")
+                send_templated_whatsapp_response(whatsapp_address, message_body)
+            else:
+                logger.warning(f"No WhatsApp participant found in conversation {conversation_sid}")
+        except Exception as template_error:
+            logger.error(f"Error sending templated message to participant: {str(template_error)}")
+            # We already added the message to the conversation, so we'll consider this a partial success
+        
+        return conversation_message.sid
     except Exception as e:
         logger.error(f"Error sending message to conversation {conversation_sid}: {str(e)}")
         raise
