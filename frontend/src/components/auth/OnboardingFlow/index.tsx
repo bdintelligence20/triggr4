@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../../contexts/AuthContext';
 import ProfileSetup from './steps/ProfileSetup';
 import ContactInfo from './steps/ContactInfo';
 import OrganizationSetup from './steps/OrganizationSetup';
@@ -12,17 +13,28 @@ type OnboardingStep = 'profile' | 'contact' | 'organization' | 'hubs' | 'video';
 
 const OnboardingFlow = () => {
   const [currentStep, setCurrentStep] = useState<OnboardingStep>('profile');
+  const { user } = useAuth();
   const [userData, setUserData] = useState({
     photoUrl: '',
-    fullName: '',
-    email: '',
-    whatsapp: '',
+    fullName: user?.fullName || '',
+    email: user?.email || '',
     organizationName: '',
     organizationSize: '',
     industry: '',
   });
   const navigate = useNavigate();
   const { setRole } = useRoleStore();
+
+  // Update userData when user data changes
+  useEffect(() => {
+    if (user) {
+      setUserData(prev => ({
+        ...prev,
+        fullName: user.fullName || prev.fullName,
+        email: user.email || prev.email,
+      }));
+    }
+  }, [user]);
 
   const handleStepComplete = (step: OnboardingStep, data?: any) => {
     if (data) {
@@ -31,9 +43,7 @@ const OnboardingFlow = () => {
 
     switch (step) {
       case 'profile':
-        setCurrentStep('contact');
-        break;
-      case 'contact':
+        // Skip contact info step and go directly to organization
         setCurrentStep('organization');
         break;
       case 'organization':
@@ -70,19 +80,6 @@ const OnboardingFlow = () => {
             </motion.div>
           )}
 
-          {currentStep === 'contact' && (
-            <motion.div
-              key="contact"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-            >
-              <ContactInfo 
-                initialData={userData}
-                onComplete={(data) => handleStepComplete('contact', data)} 
-              />
-            </motion.div>
-          )}
 
           {currentStep === 'organization' && (
             <motion.div
@@ -125,13 +122,13 @@ const OnboardingFlow = () => {
 
         {/* Progress Indicator */}
         <div className="mt-8 flex justify-center gap-2">
-          {(['profile', 'contact', 'organization', 'hubs', 'video'] as const).map((step, index) => (
+          {(['profile', 'organization', 'hubs', 'video'] as const).map((step, index) => (
             <div
               key={step}
               className={`w-2 h-2 rounded-full transition-colors ${
                 currentStep === step
                   ? 'bg-emerald-400'
-                  : index < ['profile', 'contact', 'organization', 'hubs', 'video'].indexOf(currentStep)
+                  : index < ['profile', 'organization', 'hubs', 'video'].indexOf(currentStep)
                   ? 'bg-emerald-200'
                   : 'bg-gray-200'
               }`}

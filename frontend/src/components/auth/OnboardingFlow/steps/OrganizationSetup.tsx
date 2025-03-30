@@ -128,7 +128,7 @@ const OrganizationSetup: React.FC<OrganizationSetupProps> = ({ onComplete }) => 
               value={formData.organizationName}
               onChange={handleChange}
               placeholder="Your company name"
-              className="pl-10"
+              className="pl-10 w-full"
             />
           </div>
           {errors.organizationName && (
@@ -145,6 +145,7 @@ const OrganizationSetup: React.FC<OrganizationSetupProps> = ({ onComplete }) => 
             value={formData.industry}
             onChange={handleChange}
             placeholder="e.g. Healthcare, Finance, Education"
+            className="w-full"
           />
           {errors.industry && (
             <p className="text-sm text-red-500">{errors.industry}</p>
@@ -158,7 +159,7 @@ const OrganizationSetup: React.FC<OrganizationSetupProps> = ({ onComplete }) => 
             name="organizationSize"
             value={formData.organizationSize}
             onChange={handleChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
           >
             <option value="1-10">1-10 employees</option>
             <option value="11-50">11-50 employees</option>
