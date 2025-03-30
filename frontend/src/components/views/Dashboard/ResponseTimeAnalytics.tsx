@@ -47,7 +47,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 const ChartHeader = ({ title, onDownload }: { title: string; onDownload: () => void }) => (
   <div className="flex items-center justify-between mb-6">
     <div className="flex items-center gap-2">
-      <Clock size={18} className="text-rose-500" />
+      <Clock size={18} className="text-emerald-400" />
       <h3 className="text-lg font-semibold">{title}</h3>
       <Info size={16} className="text-gray-400 cursor-help" />
     </div>
@@ -82,7 +82,7 @@ const ResponseTimeAnalytics = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-gray-50 p-4 rounded-lg">
           <p className="text-sm text-gray-500 mb-1">Overall Avg. Response</p>
-          <p className="text-2xl font-bold text-rose-500">{overallAvgTime.toFixed(1)} hrs</p>
+          <p className="text-2xl font-bold text-emerald-400">{overallAvgTime.toFixed(1)} hrs</p>
         </div>
         <div className="bg-gray-50 p-4 rounded-lg">
           <p className="text-sm text-gray-500 mb-1">Peak Hours Avg.</p>
@@ -92,7 +92,7 @@ const ResponseTimeAnalytics = () => {
         </div>
         <div className="bg-gray-50 p-4 rounded-lg">
           <p className="text-sm text-gray-500 mb-1">Off Hours Avg.</p>
-          <p className="text-2xl font-bold text-emerald-500">
+          <p className="text-2xl font-bold text-emerald-400">
             {(responseTimeData.reduce((sum, item) => sum + item.offHours, 0) / responseTimeData.length).toFixed(1)} hrs
           </p>
         </div>
@@ -112,8 +112,8 @@ const ResponseTimeAnalytics = () => {
           >
             <defs>
               <linearGradient id="colorAvgTime" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.2}/>
-                <stop offset="95%" stopColor="#f43f5e" stopOpacity={0}/>
+                <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
               </linearGradient>
               <linearGradient id="colorPeakTime" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.2}/>
@@ -133,7 +133,7 @@ const ResponseTimeAnalytics = () => {
               type="monotone" 
               dataKey="avgTime" 
               name="Average Time"
-              stroke="#f43f5e" 
+              stroke="#10b981" 
               fillOpacity={1} 
               fill="url(#colorAvgTime)" 
             />

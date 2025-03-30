@@ -79,7 +79,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       <div className="bg-white p-3 rounded-lg shadow-lg border border-gray-100">
         <p className="text-sm font-medium text-gray-900 mb-1">{data.question}</p>
         <div className="flex items-center gap-2 text-sm">
-          <div className="w-2 h-2 rounded-full bg-indigo-400" />
+          <div className="w-2 h-2 rounded-full bg-purple-500" />
           <span className="text-gray-600">Count:</span>
           <span className="font-medium">{data.count}</span>
         </div>
@@ -104,7 +104,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 const ChartHeader = ({ title, onDownload }: { title: string; onDownload: () => void }) => (
   <div className="flex items-center justify-between mb-6">
     <div className="flex items-center gap-2">
-      <HelpCircle size={18} className="text-indigo-500" />
+      <HelpCircle size={18} className="text-purple-500" />
       <h3 className="text-lg font-semibold">{title}</h3>
       <Info size={16} className="text-gray-400 cursor-help" />
     </div>
@@ -130,7 +130,7 @@ const CommonQuestions = () => {
     : commonQuestionsData.filter(q => q.category === selectedCategory);
 
   const getBarColor = (index: number) => {
-    const colors = ['#818cf8', '#6366f1', '#4f46e5', '#4338ca', '#3730a3'];
+    const colors = ['#8b5cf6', '#7c3aed', '#6d28d9', '#5b21b6', '#4c1d95'];
     return colors[index % colors.length];
   };
 
@@ -154,7 +154,7 @@ const CommonQuestions = () => {
         <select
           value={selectedCategory}
           onChange={(e) => setSelectedCategory(e.target.value)}
-          className="px-3 py-1.5 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+          className="px-3 py-1.5 text-sm border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
         >
           {categories.map(category => (
             <option key={category.id} value={category.id}>
@@ -219,8 +219,8 @@ const CommonQuestions = () => {
                 <ul className="space-y-1">
                   {question.relatedQuestions.map((relatedQ, index) => (
                     <li key={index} className="text-sm text-gray-600 flex items-start gap-2">
-                      <div className="p-1 bg-indigo-50 rounded-full mt-0.5">
-                        <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full" />
+                      <div className="p-1 bg-purple-50 rounded-full mt-0.5">
+                        <div className="w-1.5 h-1.5 bg-purple-500 rounded-full" />
                       </div>
                       {relatedQ}
                     </li>

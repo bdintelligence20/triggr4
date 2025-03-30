@@ -113,7 +113,7 @@ const LoginForm = () => {
         <p className="text-sm text-gray-500 mt-2">
           Sign in to your account to continue
         </p>
-        <p className="text-sm text-emerald-500 mt-2">
+        <p className="text-sm text-emerald-400 mt-2">
           New user? <a href="/register" className="underline">Create an account</a>
         </p>
       </div>
@@ -128,6 +128,7 @@ const LoginForm = () => {
             value={formData.email}
             onChange={handleChange}
             placeholder="you@company.com"
+            className="w-full"
           />
           {errors.email && (
             <p className="text-sm text-red-500">{errors.email}</p>
@@ -144,6 +145,7 @@ const LoginForm = () => {
               value={formData.password}
               onChange={handleChange}
               placeholder="Enter your password"
+              className="w-full"
             />
             <button
               type="button"
@@ -168,7 +170,7 @@ const LoginForm = () => {
           <button
             type="button"
             onClick={() => navigate('/forgot-password')}
-            className="text-sm text-emerald-400 hover:text-emerald-300"
+            className="text-sm text-emerald-400 hover:text-emerald-500"
           >
             Forgot password?
           </button>
@@ -181,15 +183,6 @@ const LoginForm = () => {
             disabled={isSubmitting}
           >
             {isSubmitting ? 'Signing in...' : 'Sign in'}
-          </Button>
-
-          <Button
-            type="button"
-            variant="whatsapp"
-            className="w-full"
-          >
-            <WhatsappIcon className="mr-2 h-5 w-5" />
-            Sign in with WhatsApp
           </Button>
         </div>
       </form>

@@ -982,12 +982,25 @@ def webhook():
             logger.warning(f"Member {member['id']} does not belong to an organization")
             return send_whatsapp_message(from_number, "You are not associated with any organization. Please contact your administrator.")
         
-        # Initialize RAG system
+        # Get organization name for logging
+        org_name = "Unknown Organization"
+        try:
+            org_doc = db.collection('organizations').document(organization_id).get()
+            if org_doc.exists:
+                org_data = org_doc.to_dict()
+                org_name = org_data.get('name', 'Unknown Organization')
+        except Exception as e:
+            logger.error(f"Error fetching organization data: {str(e)}")
+        
+        logger.info(f"Processing WhatsApp query for organization: {org_name} (ID: {organization_id})")
+        
+        # Initialize RAG system with organization ID
         rag = RAGSystem(
             openai_api_key=OPENAI_API_KEY,
             anthropic_api_key=ANTHROPIC_API_KEY,
             pinecone_api_key=PINECONE_API_KEY,
-            index_name=PINECONE_INDEX_NAME  # Parameter is named index_name, not pinecone_index_name
+            index_name=PINECONE_INDEX_NAME,
+            organization_id=organization_id  # Pass organization_id to RAG system
         )
         
         # Send an intermediate message to indicate processing

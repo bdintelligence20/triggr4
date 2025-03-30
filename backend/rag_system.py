@@ -331,11 +331,24 @@ class RAGSystem:
         # Remove category filter to ensure all documents in the namespace are searched
         filter_dict = None
         
+        # Use organization_id to determine the namespace
+        # If organization_id is provided in the query, use it to override the namespace
+        effective_namespace = None
+        if organization_id:
+            effective_namespace = f"org_{organization_id}"
+            logger.info(f"Using organization-specific namespace: {effective_namespace}")
+        elif self.organization_id:
+            effective_namespace = f"org_{self.organization_id}"
+            logger.info(f"Using instance organization namespace: {effective_namespace}")
+        else:
+            effective_namespace = namespace
+            logger.info(f"Using provided namespace: {effective_namespace or 'global_knowledge_base'}")
+        
         # Step 2: Query Pinecone with extra candidates
         extended_top_k = min(effective_top_k + 3, 10)  # Get a few extra candidates
         matched_docs = self.pinecone_client.query_vectors(
             query_embedding, 
-            namespace=namespace,
+            namespace=effective_namespace,
             top_k=extended_top_k,
             filter_dict=filter_dict
         )

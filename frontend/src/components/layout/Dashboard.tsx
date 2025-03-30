@@ -22,7 +22,7 @@ const Dashboard: React.FC = () => {
           
           <main 
             ref={mainContentRef}
-            className="flex-1 overflow-y-auto p-6 lg:p-8 bg-gray-50 dark:bg-gray-800 relative transition-all duration-300"
+            className="flex-1 overflow-y-auto p-6 lg:p-8 bg-gray-50 dark:bg-gray-800 relative transition-all duration-300 w-full"
           >
             <Notification />
             <Error />

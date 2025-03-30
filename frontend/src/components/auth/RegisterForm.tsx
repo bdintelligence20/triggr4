@@ -135,6 +135,7 @@ const RegisterForm: React.FC = () => {
             value={formData.fullName}
             onChange={handleChange}
             placeholder="John Doe"
+            className="w-full"
           />
           {errors.fullName && (
             <p className="text-sm text-red-500">{errors.fullName}</p>
@@ -150,6 +151,7 @@ const RegisterForm: React.FC = () => {
             value={formData.email}
             onChange={handleChange}
             placeholder="you@example.com"
+            className="w-full"
           />
           {errors.email && (
             <p className="text-sm text-red-500">{errors.email}</p>
@@ -165,6 +167,7 @@ const RegisterForm: React.FC = () => {
             value={formData.password}
             onChange={handleChange}
             placeholder="••••••••"
+            className="w-full"
           />
           {errors.password && (
             <p className="text-sm text-red-500">{errors.password}</p>
@@ -180,6 +183,7 @@ const RegisterForm: React.FC = () => {
             value={formData.confirmPassword}
             onChange={handleChange}
             placeholder="••••••••"
+            className="w-full"
           />
           {errors.confirmPassword && (
             <p className="text-sm text-red-500">{errors.confirmPassword}</p>

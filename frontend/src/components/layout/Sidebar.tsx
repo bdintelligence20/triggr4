@@ -53,16 +53,18 @@ const Sidebar: React.FC = () => {
 
   return (
     <>
-      {/* Mobile overlay */}
+      {/* Mobile overlay - only closes when clicking outside the sidebar */}
       {sidebarOpen && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 z-30 lg:hidden"
+          className="fixed inset-0 bg-black bg-opacity-50 z-20 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
       
       <aside 
-        className="w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 h-full"
+        className={`fixed lg:relative w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 h-full z-30 ${
+          sidebarOpen ? 'left-0' : '-left-64 lg:left-0'
+        }`}
       >
         {/* Sidebar toggle button */}
         <button
@@ -81,11 +83,11 @@ const Sidebar: React.FC = () => {
             className="flex items-center space-x-3 cursor-pointer"
             onClick={() => setProfileOpen(!profileOpen)}
           >
-            <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center overflow-hidden">
+            <div className="w-12 h-12 rounded-full bg-emerald-50 flex items-center justify-center overflow-hidden">
               {user?.photoUrl ? (
                 <img src={user.photoUrl} alt={user.fullName} className="w-full h-full object-cover" />
               ) : (
-                <User size={24} className="text-emerald-500" />
+                <User size={24} className="text-emerald-400" />
               )}
             </div>
             <div className="flex-1 min-w-0">
@@ -133,8 +135,8 @@ const Sidebar: React.FC = () => {
               to="/dashboard"
               className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
                 isActive('/dashboard') 
-                  ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
-                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-400 dark:text-emerald-400' 
+                  : 'text-gray-900 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
               }`}
             >
               <Book size={20} className="mr-3" />
@@ -145,8 +147,8 @@ const Sidebar: React.FC = () => {
               to="/hub"
               className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
                 isActive('/hub') 
-                  ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
-                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-400 dark:text-emerald-400' 
+                  : 'text-gray-900 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
               }`}
             >
               <FileText size={20} className="mr-3" />
@@ -157,8 +159,8 @@ const Sidebar: React.FC = () => {
               to="/library"
               className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
                 isActive('/library') 
-                  ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
-                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-400 dark:text-emerald-400' 
+                  : 'text-gray-900 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
               }`}
             >
               <Book size={20} className="mr-3" />
@@ -169,8 +171,8 @@ const Sidebar: React.FC = () => {
               to="/notify"
               className={`w-full flex items-center px-3 py-2 rounded-md transition-colors ${
                 isActive('/notify') 
-                  ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' 
-                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-400 dark:text-emerald-400' 
+                  : 'text-gray-900 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
               }`}
             >
               <Bell size={20} className="mr-3" />
@@ -184,15 +186,15 @@ const Sidebar: React.FC = () => {
         <div className="px-4 mt-auto pb-4 space-y-2">
           <Link
             to="/chat"
-            className="w-full flex items-center justify-center px-3 py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors"
+            className="w-full flex items-center justify-center px-3 py-2 rounded-md bg-emerald-400 hover:bg-emerald-500 text-white transition-colors"
           >
             <MessageSquare size={20} className="mr-2" />
-            <span>Knowledge Chat</span>
+            <span>Chat</span>
           </Link>
           
           <button
             onClick={logout}
-            className="w-full flex items-center px-3 py-2 rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className="w-full flex items-center px-3 py-2 rounded-md text-gray-900 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
           >
             <LogOut size={20} className="mr-3" />
             <span>Logout</span>
