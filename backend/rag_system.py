@@ -281,11 +281,28 @@ class RAGSystem:
         # Combine preserved and remaining lines
         return '\n'.join(remaining_lines + preserved_lines)
 
-    def query(self, user_query, namespace=None, top_k=5, category=None, stream_callback=None, history=""):
+    def query(self, user_query, namespace=None, top_k=5, category=None, stream_callback=None, history="", language="en", organization_id=None, user_id=None):
         """
         Query the system with a user question and return an AI response using retrieved context.
-        The optional 'history' parameter is used to include conversation context for follow-up questions.
+        
+        Parameters:
+            user_query (str): The user's question
+            namespace (str, optional): The namespace to search in
+            top_k (int, optional): Number of results to retrieve
+            category (str, optional): Category filter
+            stream_callback (callable, optional): Callback for streaming responses
+            history (str, optional): Conversation history for follow-up questions
+            language (str, optional): Language code for the response (e.g., 'en', 'fr', 'es')
+            organization_id (str, optional): Organization ID for filtering
+            user_id (str, optional): User ID for tracking
         """
+        # Override the instance organization_id if provided in the query
+        if organization_id:
+            self.organization_id = organization_id
+            
+        # Log user information if available
+        if user_id:
+            logger.info(f"Processing query for user: {user_id}")
         logger.info(f"Processing query: '{user_query}'")
         
         # Determine query complexity and adjust top_k
@@ -436,8 +453,14 @@ class RAGSystem:
         
         try:
             if stream_callback is None:
-                # Non-streaming response: include conversation history in the prompt
-                response = self.generate_response(context_text, user_query, lambda _: None, conversation_history=history)
+                # Non-streaming response: include conversation history and language in the prompt
+                response = self.generate_response(
+                    context=context_text, 
+                    query=user_query, 
+                    callback=lambda _: None, 
+                    conversation_history=history,
+                    language=language
+                )
                 # Cache the response
                 self.response_cache.set(user_query, context_hash, response)
                 return {
@@ -445,8 +468,14 @@ class RAGSystem:
                     "sources": sources
                 }
             else:
-                # Streaming response: pass conversation history as well
-                self.generate_streaming_response(context_text, user_query, stream_callback, conversation_history=history)
+                # Streaming response: pass conversation history and language as well
+                self.generate_streaming_response(
+                    context=context_text, 
+                    query=user_query, 
+                    callback=stream_callback, 
+                    conversation_history=history,
+                    language=language
+                )
                 return {
                     "answer": "",  # Content streamed via callback
                     "sources": sources
@@ -460,7 +489,87 @@ class RAGSystem:
             }
 
             
-    def generate_response(self, context, query, callback: Callable[[str], None], conversation_history=""):
+    def generate_response(self, context, query, callback: Callable[[str], None], conversation_history="", language="en"):
+        # Detect language if not provided
+        if language == "en":
+            # Check for non-Latin scripts first (Arabic, Chinese, Japanese, Korean, etc.)
+            if re.search(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u1100-\u11FF\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF]', query):
+                # Arabic script
+                if re.search(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]', query):
+                    language = "ar"  # Arabic
+                # Korean Hangul
+                elif re.search(r'[\u1100-\u11FF\uAC00-\uD7AF]', query):
+                    language = "ko"  # Korean
+                # Japanese Hiragana/Katakana
+                elif re.search(r'[\u3040-\u309F\u30A0-\u30FF]', query):
+                    language = "ja"  # Japanese
+                # Chinese characters (also used in Japanese and Korean)
+                elif re.search(r'[\u4E00-\u9FFF]', query):
+                    # Simple heuristic: if there are Hiragana/Katakana, it's Japanese
+                    if re.search(r'[\u3040-\u309F\u30A0-\u30FF]', query):
+                        language = "ja"  # Japanese
+                    # If there are Hangul characters, it's Korean
+                    elif re.search(r'[\uAC00-\uD7AF]', query):
+                        language = "ko"  # Korean
+                    # Otherwise, assume Chinese
+                    else:
+                        language = "zh"  # Chinese
+                # Thai script
+                elif re.search(r'[\u0E00-\u0E7F]', query):
+                    language = "th"  # Thai
+                # Hindi/Devanagari script
+                elif re.search(r'[\u0900-\u097F]', query):
+                    language = "hi"  # Hindi
+            # Then check for Latin-based languages with special characters
+            elif re.search(r'[àáâäãåąčćęèéêëėįìíîïłńòóôöõøùúûüųūÿýżźñçšžÀÁÂÄÃÅĄĆČĖĘÈÉÊËÌÍÎÏĮŁŃÒÓÔÖÕØÙÚÛÜŲŪŸÝŻŹÑßÇŒÆŠŽ]', query):
+                # Check for common words in various languages
+                if any(word in query.lower() for word in ['bonjour', 'merci', 'comment', 'pourquoi', 'quand', 'où']):
+                    language = "fr"  # French
+                elif any(word in query.lower() for word in ['hola', 'gracias', 'cómo', 'por qué', 'cuándo', 'dónde', 'buenos días', 'buenas tardes', 'buenas noches', 'qué', 'quién', 'cómo']):
+                    language = "es"  # Spanish
+                elif any(word in query.lower() for word in ['guten', 'danke', 'wie', 'warum', 'wann', 'wo']):
+                    language = "de"  # German
+                elif any(word in query.lower() for word in ['ciao', 'grazie', 'come', 'perché', 'quando', 'dove']):
+                    language = "it"  # Italian
+                elif any(word in query.lower() for word in ['olá', 'obrigado', 'como', 'por que', 'quando', 'onde']):
+                    language = "pt"  # Portuguese
+        
+        # Language-specific instructions
+        language_instruction = ""
+        if language != "en":
+            language_map = {
+                # European languages
+                "fr": "Please respond in French.",
+                "es": "Please respond in Spanish.",
+                "de": "Please respond in German.",
+                "it": "Please respond in Italian.",
+                "pt": "Please respond in Portuguese.",
+                
+                # Middle Eastern languages
+                "ar": "Please respond in Arabic.",
+                "he": "Please respond in Hebrew.",
+                "fa": "Please respond in Farsi/Persian.",
+                
+                # Asian languages
+                "zh": "Please respond in Chinese.",
+                "ja": "Please respond in Japanese.",
+                "ko": "Please respond in Korean.",
+                "hi": "Please respond in Hindi.",
+                "th": "Please respond in Thai.",
+                "vi": "Please respond in Vietnamese.",
+                "id": "Please respond in Indonesian.",
+                "ms": "Please respond in Malay.",
+                
+                # African languages
+                "af": "Please respond in Afrikaans.",
+                "zu": "Please respond in Zulu.",
+                "xh": "Please respond in Xhosa.",
+                "st": "Please respond in Sesotho.",
+                "tn": "Please respond in Setswana.",
+                "sw": "Please respond in Swahili."
+            }
+            language_instruction = language_map.get(language, f"Please respond in {language}.")
+        
         prompt = f"""
         You are a helpful, knowledgeable, and friendly AI assistant.
         
@@ -481,6 +590,7 @@ class RAGSystem:
         4. Structure your response with clear section breaks.
         5. Use bullet points or numbering for clarity.
         6. Conclude with a friendly sign-off.
+        {language_instruction}
         """
         
         try:
@@ -503,7 +613,87 @@ class RAGSystem:
             callback("\n\nI'm sorry, I encountered an error while generating a response. Please try again.")
             raise
 
-    def generate_streaming_response(self, context, query, callback: Callable[[str], None], conversation_history=""):
+    def generate_streaming_response(self, context, query, callback: Callable[[str], None], conversation_history="", language="en"):
+        # Detect language if not provided
+        if language == "en":
+            # Check for non-Latin scripts first (Arabic, Chinese, Japanese, Korean, etc.)
+            if re.search(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u1100-\u11FF\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF]', query):
+                # Arabic script
+                if re.search(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]', query):
+                    language = "ar"  # Arabic
+                # Korean Hangul
+                elif re.search(r'[\u1100-\u11FF\uAC00-\uD7AF]', query):
+                    language = "ko"  # Korean
+                # Japanese Hiragana/Katakana
+                elif re.search(r'[\u3040-\u309F\u30A0-\u30FF]', query):
+                    language = "ja"  # Japanese
+                # Chinese characters (also used in Japanese and Korean)
+                elif re.search(r'[\u4E00-\u9FFF]', query):
+                    # Simple heuristic: if there are Hiragana/Katakana, it's Japanese
+                    if re.search(r'[\u3040-\u309F\u30A0-\u30FF]', query):
+                        language = "ja"  # Japanese
+                    # If there are Hangul characters, it's Korean
+                    elif re.search(r'[\uAC00-\uD7AF]', query):
+                        language = "ko"  # Korean
+                    # Otherwise, assume Chinese
+                    else:
+                        language = "zh"  # Chinese
+                # Thai script
+                elif re.search(r'[\u0E00-\u0E7F]', query):
+                    language = "th"  # Thai
+                # Hindi/Devanagari script
+                elif re.search(r'[\u0900-\u097F]', query):
+                    language = "hi"  # Hindi
+            # Then check for Latin-based languages with special characters
+            elif re.search(r'[àáâäãåąčćęèéêëėįìíîïłńòóôöõøùúûüųūÿýżźñçšžÀÁÂÄÃÅĄĆČĖĘÈÉÊËÌÍÎÏĮŁŃÒÓÔÖÕØÙÚÛÜŲŪŸÝŻŹÑßÇŒÆŠŽ]', query):
+                # Check for common words in various languages
+                if any(word in query.lower() for word in ['bonjour', 'merci', 'comment', 'pourquoi', 'quand', 'où']):
+                    language = "fr"  # French
+                elif any(word in query.lower() for word in ['hola', 'gracias', 'cómo', 'por qué', 'cuándo', 'dónde', 'buenos días', 'buenas tardes', 'buenas noches', 'qué', 'quién', 'cómo']):
+                    language = "es"  # Spanish
+                elif any(word in query.lower() for word in ['guten', 'danke', 'wie', 'warum', 'wann', 'wo']):
+                    language = "de"  # German
+                elif any(word in query.lower() for word in ['ciao', 'grazie', 'come', 'perché', 'quando', 'dove']):
+                    language = "it"  # Italian
+                elif any(word in query.lower() for word in ['olá', 'obrigado', 'como', 'por que', 'quando', 'onde']):
+                    language = "pt"  # Portuguese
+        
+        # Language-specific instructions
+        language_instruction = ""
+        if language != "en":
+            language_map = {
+                # European languages
+                "fr": "Please respond in French.",
+                "es": "Please respond in Spanish.",
+                "de": "Please respond in German.",
+                "it": "Please respond in Italian.",
+                "pt": "Please respond in Portuguese.",
+                
+                # Middle Eastern languages
+                "ar": "Please respond in Arabic.",
+                "he": "Please respond in Hebrew.",
+                "fa": "Please respond in Farsi/Persian.",
+                
+                # Asian languages
+                "zh": "Please respond in Chinese.",
+                "ja": "Please respond in Japanese.",
+                "ko": "Please respond in Korean.",
+                "hi": "Please respond in Hindi.",
+                "th": "Please respond in Thai.",
+                "vi": "Please respond in Vietnamese.",
+                "id": "Please respond in Indonesian.",
+                "ms": "Please respond in Malay.",
+                
+                # African languages
+                "af": "Please respond in Afrikaans.",
+                "zu": "Please respond in Zulu.",
+                "xh": "Please respond in Xhosa.",
+                "st": "Please respond in Sesotho.",
+                "tn": "Please respond in Setswana.",
+                "sw": "Please respond in Swahili."
+            }
+            language_instruction = language_map.get(language, f"Please respond in {language}.")
+        
         prompt = f"""
         You are a helpful, knowledgeable, and friendly AI assistant.
         
@@ -524,6 +714,7 @@ class RAGSystem:
         4. Structure your response with clear section breaks.
         5. Use bullet points or numbering for clarity.
         6. Conclude with a friendly sign-off.
+        {language_instruction}
         """
         
         max_retries = 3

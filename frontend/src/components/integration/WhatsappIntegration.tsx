@@ -111,12 +111,12 @@ const WhatsAppIntegration: React.FC = () => {
           </ul>
           
           <p className="text-gray-600 dark:text-gray-400 mt-3 mb-2">
-            <strong>Setup Instructions:</strong> Configure your Twilio account to use the Conversations webhook:
+            <strong>Setup Instructions:</strong> Configure your Twilio account to use the correct webhook:
           </p>
           <ol className="list-decimal pl-5 text-gray-600 dark:text-gray-400">
-            <li>Go to Twilio Console &gt; Conversations &gt; Settings</li>
-            <li>Set the webhook URL to: <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">{window.location.origin}/whatsapp/conversation-webhook</code></li>
-            <li>Enable the "onMessageAdded" event</li>
+            <li>Go to Twilio Console &gt; Messaging &gt; Settings &gt; WhatsApp Sandbox</li>
+            <li>Set the webhook URL to: <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">https://triggr4bg.onrender.com/webhook</code></li>
+            <li>Ensure "When a message comes in" is set to this URL</li>
           </ol>
         </div>
         

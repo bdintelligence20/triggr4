@@ -27,8 +27,12 @@ PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "knowledge-hub-vectors")
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
-TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "+15055787929")
+# Use the WhatsApp sandbox number
+TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "+14155238886")
 TWILIO_MESSAGING_SERVICE_SID = os.environ.get("TWILIO_MESSAGING_SERVICE_SID")
+
+# Flag to determine whether to use Conversations API or direct messaging
+USE_CONVERSATIONS_API = False  # Set to False to use direct messaging with sandbox
 
 # Approved Content Template SIDs
 TEMPLATE_CONTENT_SID = "HX6ed39c2507e07cb25c75412d74f134d8"  # Template name: copy_ai_response (body: "Hi! Here is your answer: {{1}}")
@@ -120,26 +124,37 @@ def send_whatsapp_message(to_number, message_body):
     """
     Sends a WhatsApp message using the Twilio client.
     If the message exceeds 1600 characters, it is split semantically into multiple parts.
+    
+    For sandbox mode, we use the from number directly instead of the messaging service.
     """
     max_length = 1600
     # Ensure the 'to_number' has the correct WhatsApp prefix.
     if not to_number.startswith('whatsapp:'):
         to_number = f"whatsapp:{to_number}"
     
+    # Ensure the from number has the WhatsApp prefix
+    from_number = TWILIO_WHATSAPP_FROM
+    if not from_number.startswith('whatsapp:'):
+        from_number = f"whatsapp:{from_number}"
+    
+    logger.info(f"Sending WhatsApp message from {from_number} to {to_number}")
+    
     try:
         # Split the message semantically if it exceeds the max_length.
         if len(message_body) > max_length:
             chunks = split_message_semantically(message_body, max_length=max_length)
             for chunk in chunks:
+                # For sandbox, use from instead of messaging service
                 twilio_client.messages.create(
                     body=chunk,
-                    messaging_service_sid=TWILIO_MESSAGING_SERVICE_SID,
+                    from_=from_number,  # Use from_ for sandbox
                     to=to_number
                 )
         else:
+            # For sandbox, use from instead of messaging service
             twilio_client.messages.create(
                 body=message_body,
-                messaging_service_sid=TWILIO_MESSAGING_SERVICE_SID,
+                from_=from_number,  # Use from_ for sandbox
                 to=to_number
             )
         return create_twilio_response("")
@@ -160,21 +175,26 @@ def send_whatsapp_template_message(to_number, content_sid, content_variables):
     if not to_number.startswith('whatsapp:'):
         to_number = f"whatsapp:{to_number}"
     
+    # Ensure the from number has the WhatsApp prefix
+    from_number = TWILIO_WHATSAPP_FROM
+    if not from_number.startswith('whatsapp:'):
+        from_number = f"whatsapp:{from_number}"
+    
     # Enhanced logging for template debugging
     content_preview = content_variables.get("1", "")[:100] + "..." if len(content_variables.get("1", "")) > 100 else content_variables.get("1", "")
     logger.info(f"Preparing template message with SID: {content_sid}")
-    logger.info(f"Sending to: {to_number}")
+    logger.info(f"Sending from: {from_number} to: {to_number}")
     logger.info(f"Content variable length: {len(content_variables.get('1', ''))}")
     logger.info(f"Content variable preview: {content_preview}")
     logger.info(f"Content variables JSON: {json.dumps(content_variables)}")
     
     try:
-        # Try using the template with messaging service
+        # For sandbox, use from_ instead of messaging_service_sid
         logger.info(f"Attempting to send template message with SID: {content_sid}")
         message = twilio_client.messages.create(
             content_sid=content_sid,
             content_variables=json.dumps(content_variables),
-            messaging_service_sid=TWILIO_MESSAGING_SERVICE_SID,
+            from_=from_number,  # Use from_ for sandbox
             to=to_number
         )
         logger.info(f"Templated message sent successfully. Template SID: {content_sid}, Message SID: {message.sid}")
@@ -198,7 +218,7 @@ def send_whatsapp_template_message(to_number, content_sid, content_variables):
                 message = twilio_client.messages.create(
                     content_sid=content_sid,
                     content_variables=json.dumps({"1": sanitized_content}),
-                    messaging_service_sid=TWILIO_MESSAGING_SERVICE_SID,
+                    from_=from_number,  # Use from_ for sandbox
                     to=to_number
                 )
                 logger.info(f"Templated message sent with sanitized content. Message SID: {message.sid}")
@@ -207,7 +227,7 @@ def send_whatsapp_template_message(to_number, content_sid, content_variables):
                 logger.error(f"Still failed with sanitized content: {str(retry_error)}")
                 # Fall back to direct message
         
-        # Fall back to plain text message if template fails
+        # For sandbox, templates might not work, so fall back to direct message
         logger.info(f"Falling back to plain text message")
         return send_whatsapp_message(to_number, content_variables.get("1", ""))
 
@@ -981,8 +1001,71 @@ def webhook():
             pinecone_index_name=PINECONE_INDEX_NAME
         )
         
-        # Query the knowledge base
+        # Send an intermediate message to indicate processing
         try:
+            # Detect the language of the query to send the intermediate message in the same language
+            language = "en"  # Default to English
+            intermediate_message = "Searching through our knowledge base..."
+            
+            # Check for non-Latin scripts first (Arabic, Chinese, Japanese, Korean, etc.)
+            if re.search(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u1100-\u11FF\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF]', message_body):
+                # Arabic script
+                if re.search(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]', message_body):
+                    language = "ar"
+                    intermediate_message = "جاري البحث في قاعدة المعرفة لدينا..."
+                # Korean Hangul
+                elif re.search(r'[\u1100-\u11FF\uAC00-\uD7AF]', message_body):
+                    language = "ko"
+                    intermediate_message = "지식 베이스를 검색하는 중..."
+                # Japanese Hiragana/Katakana
+                elif re.search(r'[\u3040-\u309F\u30A0-\u30FF]', message_body):
+                    language = "ja"
+                    intermediate_message = "知識ベースを検索しています..."
+                # Chinese characters (also used in Japanese and Korean)
+                elif re.search(r'[\u4E00-\u9FFF]', message_body):
+                    # Simple heuristic: if there are Hiragana/Katakana, it's Japanese
+                    if re.search(r'[\u3040-\u309F\u30A0-\u30FF]', message_body):
+                        language = "ja"
+                        intermediate_message = "知識ベースを検索しています..."
+                    # If there are Hangul characters, it's Korean
+                    elif re.search(r'[\uAC00-\uD7AF]', message_body):
+                        language = "ko"
+                        intermediate_message = "지식 베이스를 검색하는 중..."
+                    # Otherwise, assume Chinese
+                    else:
+                        language = "zh"
+                        intermediate_message = "正在搜索我们的知识库..."
+                # Thai script
+                elif re.search(r'[\u0E00-\u0E7F]', message_body):
+                    language = "th"
+                    intermediate_message = "กำลังค้นหาในฐานความรู้ของเรา..."
+                # Hindi/Devanagari script
+                elif re.search(r'[\u0900-\u097F]', message_body):
+                    language = "hi"
+                    intermediate_message = "हमारे ज्ञान आधार में खोज रहे हैं..."
+            # Then check for Latin-based languages with special characters
+            elif re.search(r'[àáâäãåąčćęèéêëėįìíîïłńòóôöõøùúûüųūÿýżźñçšžÀÁÂÄÃÅĄĆČĖĘÈÉÊËÌÍÎÏĮŁŃÒÓÔÖÕØÙÚÛÜŲŪŸÝŻŹÑßÇŒÆŠŽ]', message_body):
+                # Check for common words in various languages
+                if any(word in message_body.lower() for word in ['bonjour', 'merci', 'comment', 'pourquoi', 'quand', 'où']):
+                    language = "fr"
+                    intermediate_message = "Recherche dans notre base de connaissances..."
+                elif any(word in message_body.lower() for word in ['hola', 'gracias', 'cómo', 'por qué', 'cuándo', 'dónde', 'buenos días', 'buenas tardes', 'buenas noches', 'qué', 'quién']):
+                    language = "es"
+                    intermediate_message = "Buscando en nuestra base de conocimientos..."
+                elif any(word in message_body.lower() for word in ['guten', 'danke', 'wie', 'warum', 'wann', 'wo']):
+                    language = "de"
+                    intermediate_message = "Durchsuche unsere Wissensdatenbank..."
+                elif any(word in message_body.lower() for word in ['ciao', 'grazie', 'come', 'perché', 'quando', 'dove']):
+                    language = "it"
+                    intermediate_message = "Ricerca nel nostro knowledge base..."
+                elif any(word in message_body.lower() for word in ['olá', 'obrigado', 'como', 'por que', 'quando', 'onde']):
+                    language = "pt"
+                    intermediate_message = "Pesquisando em nossa base de conhecimento..."
+            
+            # Send the intermediate message
+            send_whatsapp_message(from_number, intermediate_message)
+            logger.info(f"Sent intermediate message to {from_number}")
+            
             # Log the query
             logger.info(f"Querying knowledge base for member {member['id']} with query: {message_body}")
             
@@ -999,11 +1082,27 @@ def webhook():
             
             db.collection('queries').document(query_id).set(query_data)
             
-            # Query the knowledge base with organization filter
+            # Detect language for the response
+            language = "en"  # Default to English
+            if re.search(r'[àáâäãåąčćęèéêëėįìíîïłńòóôöõøùúûüųūÿýżźñçšžÀÁÂÄÃÅĄĆČĖĘÈÉÊËÌÍÎÏĮŁŃÒÓÔÖÕØÙÚÛÜŲŪŸÝŻŹÑßÇŒÆŠŽ]', message_body):
+                # Message contains non-English characters, likely not English
+                if any(word in message_body.lower() for word in ['bonjour', 'merci', 'comment', 'pourquoi', 'quand', 'où']):
+                    language = "fr"  # French
+                elif any(word in message_body.lower() for word in ['hola', 'gracias', 'cómo', 'por qué', 'cuándo', 'dónde']):
+                    language = "es"  # Spanish
+                elif any(word in message_body.lower() for word in ['guten', 'danke', 'wie', 'warum', 'wann', 'wo']):
+                    language = "de"  # German
+                elif any(word in message_body.lower() for word in ['ciao', 'grazie', 'come', 'perché', 'quando', 'dove']):
+                    language = "it"  # Italian
+                elif any(word in message_body.lower() for word in ['olá', 'obrigado', 'como', 'por que', 'quando', 'onde']):
+                    language = "pt"  # Portuguese
+            
+            # Query the knowledge base with organization filter and language preference
             response = rag.query(
                 query=message_body,
                 organization_id=organization_id,
-                user_id=member['id']
+                user_id=member['id'],
+                language=language  # Pass the detected language to the RAG system
             )
             
             # Sanitize the response for WhatsApp
@@ -1017,44 +1116,70 @@ def webhook():
                 'completedAt': firestore.SERVER_TIMESTAMP
             })
             
-            # Get the conversation SID if it exists
-            conversation_sid = member.get('conversationSid')
-            
-            # Try to send the response using the Conversations API
-            if conversation_sid:
-                try:
-                    logger.info(f"Sending AI response via Conversations API to {from_number}")
-                    message_sid = send_conversation_message(twilio_client, conversation_sid, response.get('answer', ''))
-                    logger.info(f"AI response sent via Conversations API. Message SID: {message_sid}")
-                    return create_twilio_response("")
-                except Exception as e:
-                    logger.error(f"Error sending AI response via Conversations API: {str(e)}")
-                    # Fall back to template message
-                    logger.info(f"Falling back to template message for AI response")
+            # For sandbox mode, we prioritize direct messaging
+            if USE_CONVERSATIONS_API:
+                # Get the conversation SID if it exists
+                conversation_sid = member.get('conversationSid')
+                
+                # Try to send the response using the Conversations API
+                if conversation_sid:
                     try:
-                        logger.info(f"Sending template response to {from_number}")
+                        logger.info(f"Sending AI response via Conversations API to {from_number}")
+                        message_sid = send_conversation_message(twilio_client, conversation_sid, response.get('answer', ''))
+                        logger.info(f"AI response sent via Conversations API. Message SID: {message_sid}")
+                        return create_twilio_response("")
+                    except Exception as e:
+                        logger.error(f"Error sending AI response via Conversations API: {str(e)}")
+                        # Fall back to template message
+                        logger.info(f"Falling back to template message for AI response")
+                        try:
+                            logger.info(f"Sending template response to {from_number}")
+                            return send_whatsapp_template_message(
+                                to_number=from_number,
+                                content_sid=TEMPLATE_CONTENT_SID,
+                                content_variables={"1": sanitized_response}
+                            )
+                        except Exception as template_error:
+                            logger.error(f"Error sending template response: {str(template_error)}")
+                            # Fall back to direct message as a last resort
+                            return send_whatsapp_message(from_number, sanitized_response)
+                else:
+                    # No conversation exists, try template message
+                    try:
+                        logger.info(f"No conversation found, sending template response to {from_number}")
                         return send_whatsapp_template_message(
                             to_number=from_number,
                             content_sid=TEMPLATE_CONTENT_SID,
                             content_variables={"1": sanitized_response}
                         )
-                    except Exception as template_error:
-                        logger.error(f"Error sending template response: {str(template_error)}")
-                        # Fall back to direct message as a last resort
+                    except Exception as e:
+                        logger.error(f"Error sending template response: {str(e)}")
+                        # Fall back to direct message
                         return send_whatsapp_message(from_number, sanitized_response)
             else:
-                # No conversation exists, try template message
+                # For sandbox mode, use direct messaging
+                logger.info(f"Using direct messaging for sandbox mode")
+                
+                # Record the conversation in Firestore if needed
+                conversation_sid = member.get('conversationSid')
+                if conversation_sid and USE_CONVERSATIONS_API:
+                    try:
+                        # Add the message to the conversation for record-keeping only
+                        twilio_client.conversations.v1.services(CONVERSATIONS_SERVICE_SID).conversations(conversation_sid).messages.create(
+                            author="system",
+                            body=response.get('answer', '')
+                        )
+                        logger.info(f"Added message to conversation {conversation_sid} for record-keeping")
+                    except Exception as e:
+                        logger.error(f"Error adding message to conversation: {str(e)}")
+                
+                # Try to send a direct message using the sandbox number
                 try:
-                    logger.info(f"No conversation found, sending template response to {from_number}")
-                    return send_whatsapp_template_message(
-                        to_number=from_number,
-                        content_sid=TEMPLATE_CONTENT_SID,
-                        content_variables={"1": sanitized_response}
-                    )
-                except Exception as e:
-                    logger.error(f"Error sending template response: {str(e)}")
-                    # Fall back to direct message
+                    logger.info(f"Sending direct message to {from_number} using sandbox number")
                     return send_whatsapp_message(from_number, sanitized_response)
+                except Exception as e:
+                    logger.error(f"Error sending direct message: {str(e)}")
+                    return create_twilio_response(sanitized_response)
                 
         except Exception as e:
             logger.error(f"Error querying knowledge base: {str(e)}")
