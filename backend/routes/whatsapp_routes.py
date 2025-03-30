@@ -27,12 +27,12 @@ PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "knowledge-hub-vectors")
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
-# Use the WhatsApp sandbox number
-TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "+14155238886")
+# Use the WhatsApp sandbox number - ALWAYS use this for testing
+TWILIO_WHATSAPP_FROM = "+14155238886"  # Twilio WhatsApp sandbox number
 TWILIO_MESSAGING_SERVICE_SID = os.environ.get("TWILIO_MESSAGING_SERVICE_SID")
 
 # Flag to determine whether to use Conversations API or direct messaging
-USE_CONVERSATIONS_API = False  # Set to False to use direct messaging with sandbox
+USE_CONVERSATIONS_API = False  # Always use direct messaging with sandbox
 
 # Approved Content Template SIDs
 TEMPLATE_CONTENT_SID = "HX6ed39c2507e07cb25c75412d74f134d8"  # Template name: copy_ai_response (body: "Hi! Here is your answer: {{1}}")
@@ -998,7 +998,7 @@ def webhook():
             openai_api_key=OPENAI_API_KEY,
             anthropic_api_key=ANTHROPIC_API_KEY,
             pinecone_api_key=PINECONE_API_KEY,
-            pinecone_index_name=PINECONE_INDEX_NAME
+            index_name=PINECONE_INDEX_NAME  # Parameter is named index_name, not pinecone_index_name
         )
         
         # Send an intermediate message to indicate processing
