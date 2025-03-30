@@ -313,13 +313,21 @@ def create_member_conversation(twilio_client, member_id, phone_number, org_name)
         if not whatsapp_address.startswith('whatsapp:'):
             whatsapp_address = f"whatsapp:{phone_number}"
         
+        # Ensure the TWILIO_WHATSAPP_FROM also has the WhatsApp prefix
+        proxy_address = TWILIO_WHATSAPP_FROM
+        if not proxy_address.startswith('whatsapp:'):
+            proxy_address = f"whatsapp:{TWILIO_WHATSAPP_FROM}"
+        
+        logger.info(f"Adding participant with address: {whatsapp_address}")
+        logger.info(f"Using proxy address: {proxy_address}")
+        
         # Add the member as a participant (using their WhatsApp address)
         # IMPORTANT: Do NOT use identity parameter for WhatsApp participants
         try:
             member_participant = twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation.sid).participants.create(
                 # Removed identity parameter - not supported for WhatsApp
                 messaging_binding_address=whatsapp_address,
-                messaging_binding_proxy_address=TWILIO_WHATSAPP_FROM
+                messaging_binding_proxy_address=proxy_address
             )
             
             logger.info(f"Added member {member_id} as participant to conversation {conversation.sid}")
