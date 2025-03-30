@@ -286,6 +286,52 @@ def get_or_create_conversations_service(twilio_client):
         logger.error(f"Error creating/updating Conversations service: {str(e)}")
         raise
 
+def find_existing_conversation_for_participant(twilio_client, phone_number):
+    """
+    Find an existing conversation where the participant with the given phone number is already added.
+    
+    Args:
+        twilio_client: The Twilio client
+        phone_number: The participant's phone number
+        
+    Returns:
+        The conversation SID if found, None otherwise
+    """
+    try:
+        # Ensure the phone number has the WhatsApp prefix
+        whatsapp_address = phone_number
+        if not whatsapp_address.startswith('whatsapp:'):
+            whatsapp_address = f"whatsapp:{phone_number}"
+            
+        logger.info(f"Searching for existing conversations with participant: {whatsapp_address}")
+        
+        # Use the hardcoded Conversations Service SID
+        conversations_service_sid = CONVERSATIONS_SERVICE_SID
+        
+        # List all conversations in the service
+        conversations = twilio_client.conversations.v1.services(conversations_service_sid).conversations.list(limit=50)
+        
+        # For each conversation, check if the participant is already added
+        for conversation in conversations:
+            try:
+                # List participants in this conversation
+                participants = twilio_client.conversations.v1.services(conversations_service_sid).conversations(conversation.sid).participants.list()
+                
+                # Check if any participant has the matching WhatsApp address
+                for participant in participants:
+                    if hasattr(participant, 'messaging_binding') and participant.messaging_binding.get('address') == whatsapp_address:
+                        logger.info(f"Found existing conversation {conversation.sid} for participant {whatsapp_address}")
+                        return conversation.sid
+            except Exception as e:
+                logger.warning(f"Error checking participants in conversation {conversation.sid}: {str(e)}")
+                continue
+        
+        logger.info(f"No existing conversation found for participant {whatsapp_address}")
+        return None
+    except Exception as e:
+        logger.error(f"Error finding existing conversation for participant: {str(e)}")
+        return None
+
 def create_member_conversation(twilio_client, member_id, phone_number, org_name):
     """Create a new conversation for a verified member."""
     try:
@@ -497,10 +543,12 @@ def handle_verification_code(from_number, message):
                         org_name = org_data.get('name', org_name)
                         logger.info(f"Member {member_id} belongs to organization: {org_name} ({org_id})")
                 
-                # Create a conversation for the member
-                try:
-                    conversation_sid = create_member_conversation(twilio_client, member_id, phone_number, org_name)
-                    logger.info(f"Created conversation {conversation_sid} for member {member_id}")
+                # Check if the participant is already in a conversation
+                existing_conversation_sid = find_existing_conversation_for_participant(twilio_client, phone_number)
+                
+                if existing_conversation_sid:
+                    logger.info(f"Found existing conversation {existing_conversation_sid} for member {member_id}")
+                    conversation_sid = existing_conversation_sid
                     
                     # Update member with conversation SID and verification status
                     db.collection('members').document(member_id).update({
@@ -509,14 +557,28 @@ def handle_verification_code(from_number, message):
                         'verifiedAt': firestore.SERVER_TIMESTAMP,
                         'conversationSid': conversation_sid
                     })
-                except Exception as e:
-                    logger.error(f"Error creating conversation for member {member_id}: {str(e)}")
-                    # Continue with verification even if conversation creation fails
-                    db.collection('members').document(member_id).update({
-                        'whatsappVerified': True,
-                        'status': 'active',
-                        'verifiedAt': firestore.SERVER_TIMESTAMP
-                    })
+                else:
+                    # Create a new conversation for the member
+                    try:
+                        conversation_sid = create_member_conversation(twilio_client, member_id, phone_number, org_name)
+                        logger.info(f"Created conversation {conversation_sid} for member {member_id}")
+                        
+                        # Update member with conversation SID and verification status
+                        db.collection('members').document(member_id).update({
+                            'whatsappVerified': True,
+                            'status': 'active',
+                            'verifiedAt': firestore.SERVER_TIMESTAMP,
+                            'conversationSid': conversation_sid
+                        })
+                    except Exception as e:
+                        logger.error(f"Error creating conversation for member {member_id}: {str(e)}")
+                        # Continue with verification even if conversation creation fails
+                        db.collection('members').document(member_id).update({
+                            'whatsappVerified': True,
+                            'status': 'active',
+                            'verifiedAt': firestore.SERVER_TIMESTAMP
+                        })
+                        conversation_sid = None
                 
                 logger.info(f"WhatsApp verification successful for member {member_id}")
                 
