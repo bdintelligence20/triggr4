@@ -32,7 +32,7 @@ TWILIO_MESSAGING_SERVICE_SID = os.environ.get("TWILIO_MESSAGING_SERVICE_SID")
 
 # Approved Content Template SIDs
 TEMPLATE_CONTENT_SID = "HX6ed39c2507e07cb25c75412d74f134d8"  # Template name: copy_ai_response (body: "Hi! Here is your answer: {{1}}")
-VERIFICATION_TEMPLATE_SID = "HX04cab39d2e6c1bf04d2b09754bed90a9"  # Template for verification messages (body: "Your WhatsApp number has been verified successfully! You can now query the knowledge base for {{1}}. Try asking a question!")
+VERIFICATION_TEMPLATE_SID = "HX49a2a0f54d02996525960683dce1020b"  # Template for verification messages (body: "Your WhatsApp number has been verified successfully! You can now query the knowledge base for {{1}} resources. Try asking a question!")
 
 # Default friendly name for the Conversations Service
 CONVERSATIONS_SERVICE_NAME = "Knowledge Hub Conversations"
@@ -69,7 +69,11 @@ def send_templated_whatsapp_response(to_number, message):
 def send_verification_whatsapp_response(to_number, org_name):
     """Send a WhatsApp verification message using the dedicated verification template."""
     logger.info(f"Sending verification message to {to_number} with org name: {org_name}")
+    logger.info(f"Using verification template SID: {VERIFICATION_TEMPLATE_SID}")
+    logger.info(f"Organization name (unsanitized): {org_name}")
+    
     try:
+        # Pass org_name directly without sanitization
         return send_whatsapp_template_message(
             to_number=to_number,
             content_sid=VERIFICATION_TEMPLATE_SID,
@@ -78,7 +82,7 @@ def send_verification_whatsapp_response(to_number, org_name):
     except Exception as e:
         logger.error(f"Error sending verification message: {str(e)}")
         # Fall back to direct message as a last resort
-        message = f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name}. Try asking a question!"
+        message = f"Your WhatsApp number has been verified successfully! You can now query the knowledge base for {org_name} resources. Try asking a question!"
         return send_whatsapp_message(to_number, message)
 
 def send_whatsapp_message(to_number, message_body):
@@ -125,13 +129,17 @@ def send_whatsapp_template_message(to_number, content_sid, content_variables):
     if not to_number.startswith('whatsapp:'):
         to_number = f"whatsapp:{to_number}"
     
-    # Log template content for debugging
+    # Enhanced logging for template debugging
     content_preview = content_variables.get("1", "")[:100] + "..." if len(content_variables.get("1", "")) > 100 else content_variables.get("1", "")
-    logger.info(f"Preparing template message with content length: {len(content_variables.get('1', ''))}")
-    logger.info(f"Template content preview: {content_preview}")
+    logger.info(f"Preparing template message with SID: {content_sid}")
+    logger.info(f"Sending to: {to_number}")
+    logger.info(f"Content variable length: {len(content_variables.get('1', ''))}")
+    logger.info(f"Content variable preview: {content_preview}")
+    logger.info(f"Content variables JSON: {json.dumps(content_variables)}")
     
     try:
         # Try using the template with messaging service
+        logger.info(f"Attempting to send template message with SID: {content_sid}")
         message = twilio_client.messages.create(
             content_sid=content_sid,
             content_variables=json.dumps(content_variables),
@@ -139,6 +147,7 @@ def send_whatsapp_template_message(to_number, content_sid, content_variables):
             to=to_number
         )
         logger.info(f"Templated message sent successfully. Template SID: {content_sid}, Message SID: {message.sid}")
+        logger.info(f"Message status: {message.status}")
         return create_twilio_response("")
     except Exception as e:
         error_message = str(e)
