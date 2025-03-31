@@ -66,16 +66,6 @@ const Sidebar: React.FC = () => {
           sidebarOpen ? 'left-0' : '-left-64 lg:left-0'
         }`}
       >
-        {/* Sidebar toggle button */}
-        <button
-          onClick={toggleSidebar}
-          className="absolute right-0 translate-x-full top-4 z-50 bg-white dark:bg-gray-900 p-2 rounded-r-md border border-l-0 border-gray-200 dark:border-gray-700 hidden lg:flex items-center justify-center text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-        >
-          <ChevronLeft 
-            size={20} 
-            className={`transform transition-transform ${sidebarOpen ? '' : 'rotate-180'}`} 
-          />
-        </button>
         <div className="flex-grow overflow-y-auto flex flex-col h-full">
         {/* User Profile */}
         <div className="p-4 border-b border-gray-200 dark:border-gray-700" ref={profileRef}>
