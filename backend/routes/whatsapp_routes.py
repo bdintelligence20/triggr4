@@ -527,13 +527,22 @@ def send_conversation_message(twilio_client, conversation_sid, message_body, aut
 
 def handle_verification_code(from_number, message):
     """Handle verification code messages."""
-    # Extract verification code (assuming it's a 6-character alphanumeric code)
-    code_match = re.search(r'\b([A-Z0-9]{6})\b', message.upper())
+    # Extract verification code (must be exactly 6 digits)
+    code_match = re.search(r'\b([0-9]{6})\b', message)
     if not code_match:
         logger.info(f"No verification code found in message: '{message}'")
         return None
     
+    # Additional check to ensure the message is primarily a verification code
+    # If the message is much longer than the code, it's likely a regular query
     verification_code = code_match.group(1)
+    message_without_code = message.replace(verification_code, "").strip()
+    
+    # If there's a lot of other text, this is probably not a verification attempt
+    if len(message_without_code) > 20:  # If there's more than 20 chars of other text
+        logger.info(f"Message contains a 6-digit code but appears to be a regular query: '{message}'")
+        return None
+    
     logger.info(f"Verification code extracted: {verification_code}")
     
     # Clean the phone number (remove whatsapp: prefix if present)

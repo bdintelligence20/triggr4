@@ -3,6 +3,7 @@ import { X, Search, Mail, Plus, Trash2, Phone, Briefcase, User } from 'lucide-re
 import { useAuth } from '../../../contexts/AuthContext';
 import { useAppContext } from '../../../contexts/AppContext';
 import * as api from '../../../services/api';
+import CountryCodeSelector from '../../ui/CountryCodeSelector';
 
 interface Member {
   id: string;
@@ -31,6 +32,7 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
   const [searchQuery, setSearchQuery] = useState('');
   const [emailInput, setEmailInput] = useState('');
   const [nameInput, setNameInput] = useState('');
+  const [countryCode, setCountryCode] = useState('+27'); // Default to South Africa
   const [phoneInput, setPhoneInput] = useState('');
   const [positionInput, setPositionInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -106,8 +108,8 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
 
   // Helper function to validate phone number format
   const isValidPhoneNumber = (phone: string): boolean => {
-    // Check if the phone number starts with + and has at least 8 digits
-    const phoneRegex = /^\+\d{1,3}\d{6,14}$/;
+    // Check if the phone number has at least 6 digits
+    const phoneRegex = /^\d{6,14}$/;
     return phoneRegex.test(phone);
   };
 
@@ -134,10 +136,13 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
     
     // Validate phone number format
     if (!isValidPhoneNumber(phoneInput)) {
-      showNotification('Phone number must be in international format with + prefix (e.g., +27123456789)', 'error');
+      showNotification('Phone number must contain at least 6 digits', 'error');
       console.log('Invalid phone number format');
       return;
     }
+    
+    // Combine country code with phone number
+    const fullPhoneNumber = `${countryCode}${phoneInput}`;
     
     if (members.find(m => m.email === emailInput)) {
       showNotification('A member with this email already exists', 'error');
@@ -145,7 +150,7 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
       return;
     }
     
-    if (members.find(m => m.phone === phoneInput)) {
+    if (members.find(m => m.phone === fullPhoneNumber)) {
       showNotification('A member with this phone number already exists', 'error');
       console.log('Phone number already exists');
       return;
@@ -155,7 +160,7 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
     console.log('Sending API request with data:', {
       name: nameInput,
       email: emailInput,
-      phone: phoneInput,
+      phone: fullPhoneNumber,
       position: positionInput,
       role: 'viewer'
     });
@@ -164,7 +169,7 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
       console.log('About to call API with data:', {
         name: nameInput,
         email: emailInput,
-        phone: phoneInput,
+        phone: fullPhoneNumber,
         position: positionInput,
         role: 'viewer'
       });
@@ -173,7 +178,7 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
       const response = await api.addMember({
         name: nameInput,
         email: emailInput,
-        phone: phoneInput,
+        phone: fullPhoneNumber,
         position: positionInput,
         role: 'viewer'
       });
@@ -201,10 +206,16 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
           
           showNotification('Member added successfully', 'success');
           console.log('Member added successfully');
+          
+          // Close the modal after successful addition
+          onClose();
         } else {
           console.log('No member data in response:', response.data);
           // If for some reason the member property is missing, try to fetch members again
           fetchMembers();
+          
+          // Close the modal after successful addition
+          onClose();
         }
       } else {
         console.log('No data in response');
@@ -340,17 +351,23 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
                 />
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
               </div>
-              <div className="relative">
-                <input
-                  type="tel"
-                  value={phoneInput}
-                  onChange={(e) => setPhoneInput(e.target.value)}
-                  placeholder="Phone Number (with country code) *"
-                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
-                  required
+              <div className="flex">
+                <CountryCodeSelector
+                  selectedCountryCode={countryCode}
+                  onSelect={setCountryCode}
                 />
-                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                <p className="text-xs text-gray-500 mt-1">Format: +[country code][number] (e.g., +27123456789)</p>
+                <div className="relative flex-1">
+                  <input
+                    type="tel"
+                    value={phoneInput}
+                    onChange={(e) => setPhoneInput(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Phone Number *"
+                    className="w-full pl-10 pr-4 py-2 border rounded-r-lg focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+                    required
+                  />
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                  <p className="text-xs text-gray-500 mt-1">Enter numbers only, country code is selected from dropdown</p>
+                </div>
               </div>
               <div className="relative">
                 <input
@@ -367,7 +384,6 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
               onClick={async (e) => {
                 e.preventDefault();
                 console.log('Add Member button clicked - event handler');
-                alert('Add Member button clicked - This alert confirms the button is working');
                 
                 // Check if user has organizationId
                 if (!user?.organizationId) {
@@ -389,12 +405,22 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
                   return;
                 }
                 
+                // Validate phone number format
+                if (!isValidPhoneNumber(phoneInput)) {
+                  showNotification('Phone number must contain at least 6 digits', 'error');
+                  console.log('Invalid phone number format');
+                  return;
+                }
+                
+                // Combine country code with phone number
+                const fullPhoneNumber = `${countryCode}${phoneInput}`;
+                
                 // Directly make the API call here to bypass any potential issues in handleAddMember
                 try {
                   console.log('Making direct API call with data:', {
                     name: nameInput,
                     email: emailInput,
-                    phone: phoneInput,
+                    phone: fullPhoneNumber,
                     position: positionInput,
                     role: 'viewer'
                   });
@@ -405,7 +431,7 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
                   const response = await api.addMember({
                     name: nameInput,
                     email: emailInput,
-                    phone: phoneInput,
+                    phone: fullPhoneNumber,
                     position: positionInput,
                     role: 'viewer'
                   });
@@ -430,12 +456,15 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
                       
                       showNotification('Member added successfully', 'success');
                       
-                      // Refresh the members list
-                      fetchMembers();
+                      // Close the modal after successful addition
+                      onClose();
                     } else {
                       console.warn('No member data in response:', response.data);
                       // Refresh the members list anyway
                       fetchMembers();
+                      
+                      // Close the modal after successful addition
+                      onClose();
                     }
                   }
                 } catch (err) {
