@@ -330,6 +330,7 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
           <div className="bg-gray-50 p-4 rounded-lg">
             <h3 className="font-medium mb-3">Add New Member</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              {/* First row */}
               <div className="relative">
                 <input
                   type="text"
@@ -351,33 +352,39 @@ const ManageMembersModal: React.FC<ManageMembersModalProps> = ({ isOpen, onClose
                 />
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
               </div>
-              <div className="flex">
-                <CountryCodeSelector
-                  selectedCountryCode={countryCode}
-                  onSelect={setCountryCode}
-                />
-                <div className="relative flex-1">
-                  <input
-                    type="tel"
-                    value={phoneInput}
-                    onChange={(e) => setPhoneInput(e.target.value.replace(/\D/g, ''))}
-                    placeholder="Phone Number *"
-                    className="w-full pl-10 pr-4 py-2 border rounded-r-lg focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
-                    required
-                  />
-                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                  <p className="text-xs text-gray-500 mt-1">Enter numbers only, country code is selected from dropdown</p>
-                </div>
-              </div>
+              
+              {/* Second row */}
               <div className="relative">
-                <input
-                  type="text"
-                  value={positionInput}
-                  onChange={(e) => setPositionInput(e.target.value)}
-                  placeholder="Position/Title"
-                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
-                />
-                <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                <div className="flex">
+                  <CountryCodeSelector
+                    selectedCountryCode={countryCode}
+                    onSelect={setCountryCode}
+                  />
+                  <div className="relative flex-1">
+                    <input
+                      type="tel"
+                      value={phoneInput}
+                      onChange={(e) => setPhoneInput(e.target.value.replace(/\D/g, ''))}
+                      placeholder="Phone Number *"
+                      className="w-full pl-10 pr-4 py-2 border rounded-r-lg focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+                      required
+                    />
+                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Enter numbers only, country code is selected from dropdown</p>
+              </div>
+              <div className="relative flex items-center">
+                <div className="relative w-full">
+                  <input
+                    type="text"
+                    value={positionInput}
+                    onChange={(e) => setPositionInput(e.target.value)}
+                    placeholder="Position/Title"
+                    className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+                  />
+                  <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                </div>
               </div>
             </div>
             <button
