@@ -18,8 +18,8 @@ const WhatsAppIntegration: React.FC = () => {
 
   // Generate a WhatsApp number
   const generateWhatsappNumber = () => {
-    // Use the fixed WhatsApp number since that's the only working one
-    const number = "+15055787929";
+    // Use the fixed WATI WhatsApp number
+    const number = "+15557107684";
     setWhatsappNumber(number);
     setShowShareOptions(true);
   
@@ -49,8 +49,8 @@ const WhatsAppIntegration: React.FC = () => {
     if (!whatsappNumber) return;
     
     let shareUrl = '';
-    // Prepend the sandbox code "join wife-universe - " to the message
-    const message = `join wife-universe - Here's the WhatsApp number for the HR HUB: ${whatsappNumber}`;
+    // No need for sandbox code with WATI
+    const message = `Here's the WhatsApp number for the HR HUB: ${whatsappNumber}`;
     
     switch (method) {
       case 'whatsapp':
@@ -84,40 +84,36 @@ const WhatsAppIntegration: React.FC = () => {
         </p>
         
         <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg mb-6 text-sm">
-          <h4 className="font-medium text-blue-700 dark:text-blue-300 mb-2">New: Enhanced WhatsApp Integration</h4>
+          <h4 className="font-medium text-blue-700 dark:text-blue-300 mb-2">New: Improved WhatsApp Integration with WATI</h4>
           <p className="text-gray-600 dark:text-gray-400 mb-2">
-            We've upgraded our WhatsApp integration with two key improvements:
+            We've upgraded our WhatsApp integration to use WATI for better reliability and features:
           </p>
           
-          <h5 className="font-medium text-blue-600 dark:text-blue-400 mt-3 mb-1">1. SMS Verification</h5>
+          <h5 className="font-medium text-blue-600 dark:text-blue-400 mt-3 mb-1">1. Template Messages</h5>
           <p className="text-gray-600 dark:text-gray-400 mb-2">
-            Members now verify their accounts via SMS for improved reliability:
+            We now use approved WhatsApp templates for important messages:
           </p>
           <ul className="list-disc pl-5 text-gray-600 dark:text-gray-400 mb-2">
-            <li>Higher verification success rate</li>
-            <li>Simplified user experience</li>
-            <li>Members receive a verification code via SMS</li>
-            <li>They send the code to the WhatsApp number to complete verification</li>
+            <li>Verification codes sent via templates</li>
+            <li>Welcome messages for new members</li>
+            <li>Knowledge base responses when needed</li>
+            <li>Improved message delivery reliability</li>
           </ul>
           
-          <h5 className="font-medium text-blue-600 dark:text-blue-400 mt-3 mb-1">2. Conversations API</h5>
+          <h5 className="font-medium text-blue-600 dark:text-blue-400 mt-3 mb-1">2. Simplified Verification</h5>
           <p className="text-gray-600 dark:text-gray-400 mb-2">
-            We now use Twilio Conversations API for improved messaging:
+            The verification process is now simpler:
           </p>
           <ul className="list-disc pl-5 text-gray-600 dark:text-gray-400 mb-2">
-            <li>More reliable message delivery</li>
-            <li>Better handling of markdown and special characters</li>
-            <li>Improved conversation history</li>
+            <li>Members receive a verification code directly via WhatsApp</li>
+            <li>They simply reply with the code to verify</li>
+            <li>No need for SMS or additional steps</li>
+            <li>Higher verification success rate</li>
           </ul>
           
           <p className="text-gray-600 dark:text-gray-400 mt-3 mb-2">
-            <strong>Setup Instructions:</strong> Configure your Twilio account to use the correct webhook:
+            <strong>Note:</strong> No additional setup is required. The WhatsApp integration is ready to use.
           </p>
-          <ol className="list-decimal pl-5 text-gray-600 dark:text-gray-400">
-            <li>Go to Twilio Console &gt; Messaging &gt; Settings &gt; WhatsApp Sandbox</li>
-            <li>Set the webhook URL to: <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded">https://triggr4bg.onrender.com/webhook</code></li>
-            <li>Ensure "When a message comes in" is set to this URL</li>
-          </ol>
         </div>
         
         {whatsappNumber ? (

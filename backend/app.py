@@ -33,10 +33,15 @@ firebase_cred_b64 = os.environ.get("FIREBASE_CRED_B64")
 gcs_cred_b64 = os.environ.get("GCS_CRED_B64")
 GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "knowledge-hub-files")
 
-# Twilio Credentials
+# Twilio Credentials (Legacy)
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "+15055787929") 
+
+# WATI Credentials
+WATI_API_URL = os.environ.get("WATI_API_URL")
+WATI_API_TOKEN = os.environ.get("WATI_API_TOKEN")
+WATI_WHATSAPP_NUMBER = os.environ.get("WATI_WHATSAPP_NUMBER", "15557107684")
 
 # Validate required environment variables
 if not (OPENAI_API_KEY and ANTHROPIC_API_KEY and PINECONE_API_KEY and 

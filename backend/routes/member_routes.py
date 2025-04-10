@@ -323,6 +323,9 @@ def generate_verification_code(length=6):
     """Generate a random numeric verification code of specified length."""
     return ''.join(random.choices(string.digits, k=length))
 
+# Import WATI client
+from wati_client import get_wati_client
+
 # Send WhatsApp verification to a member
 @member_bp.route('/send-verification', methods=['POST'])
 def send_whatsapp_verification():
@@ -367,28 +370,18 @@ def send_whatsapp_verification():
         if member_data.get('organizationId') != organization_id:
             return jsonify({'error': 'Unauthorized to verify this member'}), 403
         
-        # Get Twilio credentials
-        twilio_account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
-        twilio_auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
-        twilio_messaging_service_sid = os.environ.get("TWILIO_MESSAGING_SERVICE_SID")
-        
-        if not all([twilio_account_sid, twilio_auth_token, twilio_messaging_service_sid]):
-            logger.warning("Twilio credentials or Messaging Service SID not found.")
-            return jsonify({'error': 'Twilio credentials not fully configured'}), 500
-        
         try:
-            # Initialize Twilio client
-            from twilio.rest import Client
-            twilio_client = Client(twilio_account_sid, twilio_auth_token)
+            # Initialize WATI client
+            wati_client = get_wati_client()
             
-            # Get or create a Verify service
-            verify_service_sid = get_or_create_verify_service(twilio_client)
-            
-            # Format the phone number (must be E.164 format without the whatsapp: prefix)
+            # Format the phone number (must be E.164 format without the + prefix for WATI)
             to_number = member_data.get('phone')
             # Remove whatsapp: prefix if present
             if to_number.startswith('whatsapp:'):
                 to_number = to_number[9:]
+            # Remove + prefix for WATI
+            if to_number.startswith('+'):
+                to_number = to_number[1:]
             
             # Get organization name
             org_name = "Knowledge Hub"
@@ -397,57 +390,59 @@ def send_whatsapp_verification():
                 org_data = org_doc.to_dict()
                 org_name = org_data.get('name', org_name)
             
-            # Send verification via SMS using Verify API
+            # Generate verification code
+            verification_code = generate_verification_code(6)
+            
+            # Store verification code in Firestore with expiration
+            verification_expiry = datetime.now() + timedelta(minutes=15)
+            members_ref.document(member_id).update({
+                'verificationCode': verification_code,
+                'verificationExpiry': verification_expiry.isoformat(),
+                'verificationSent': True,
+                'verificationSentAt': firestore.SERVER_TIMESTAMP,
+                'updatedAt': firestore.SERVER_TIMESTAMP,
+                'updatedBy': user_query[0].id
+            })
+            
+            # Add or update contact in WATI with organization info
             try:
-                logger.info(f"Sending SMS verification to {to_number} using Verify service {verify_service_sid}")
-                
-                # Create the verification parameters
-                verification_params = {
-                    'to': to_number,
-                    'channel': 'sms'
-                }
-                
-                # Log the verification parameters
-                logger.info(f"Verification parameters: {verification_params}")
-                
-                # Create the verification
-                verification = twilio_client.verify.v2.services(verify_service_sid).verifications.create(**verification_params)
-                
-                # If we get here, the verification was successful
-                logger.info(f"SMS verification sent successfully. SID: {verification.sid}")
-                
-                # Store verification information in Firestore
-                members_ref.document(member_id).update({
-                    'smsVerificationSent': True,
-                    'smsVerificationSentAt': firestore.SERVER_TIMESTAMP,
-                    'verificationSid': verification.sid,
-                    'updatedAt': firestore.SERVER_TIMESTAMP,
-                    'updatedBy': user_query[0].id
-                })
-                
-                return jsonify({
-                    'memberId': member_id,
-                    'status': 'verification_sent',
-                    'verificationSid': verification.sid
-                }), 200
-                
+                # First check if contact exists by trying to update
+                wati_client.update_contact_attributes(to_number, [
+                    {"name": "organizationId", "value": organization_id},
+                    {"name": "organizationName", "value": org_name},
+                    {"name": "memberId", "value": member_id},
+                    {"name": "verificationCode", "value": verification_code}
+                ])
+                logger.info(f"Updated contact attributes for {to_number}")
             except Exception as e:
-                logger.error(f"Error sending SMS verification: {str(e)}")
-                # Log detailed error information
-                if hasattr(e, 'code'):
-                    logger.error(f"Twilio error code: {e.code}")
-                if hasattr(e, 'msg'):
-                    logger.error(f"Twilio error message: {e.msg}")
-                if hasattr(e, 'status'):
-                    logger.error(f"Twilio error status: {e.status}")
-                if hasattr(e, 'details'):
-                    logger.error(f"Twilio error details: {e.details}")
-                
-                return jsonify({'error': f'Failed to send SMS verification: {str(e)}'}), 500
+                logger.warning(f"Error updating contact, will try to add: {str(e)}")
+                # If update fails, add the contact
+                try:
+                    wati_client.add_contact(to_number, member_data.get('name', ''), [
+                        {"name": "organizationId", "value": organization_id},
+                        {"name": "organizationName", "value": org_name},
+                        {"name": "memberId", "value": member_id},
+                        {"name": "verificationCode", "value": verification_code}
+                    ])
+                    logger.info(f"Added new contact for {to_number}")
+                except Exception as add_error:
+                    logger.error(f"Error adding contact: {str(add_error)}")
+                    # Continue anyway, as the template message might still work
+            
+            # Send verification template message
+            logger.info(f"Sending verification code {verification_code} to {to_number}")
+            wati_client.send_template_message(to_number, "app_verification", [
+                {"name": "1", "value": verification_code}
+            ])
+            
+            return jsonify({
+                'memberId': member_id,
+                'status': 'verification_sent'
+            }), 200
             
         except Exception as e:
-            logger.error(f"Error initializing Twilio client: {str(e)}")
-            return jsonify({'error': f'Failed to initialize Twilio client: {str(e)}'}), 500
+            logger.error(f"Error sending verification: {str(e)}")
+            return jsonify({'error': f'Failed to send verification: {str(e)}'}), 500
         
     except Exception as e:
         logger.error(f"Error sending verification: {str(e)}")
@@ -499,85 +494,88 @@ def verify_whatsapp_code():
             return jsonify({'error': 'Unauthorized to verify this member'}), 403
         
         # Check if verification was sent
-        if not member_data.get('smsVerificationSent'):
+        if not member_data.get('verificationSent'):
             return jsonify({'error': 'No verification was sent to this member'}), 400
         
-        # Get the verification SID
-        verification_sid = member_data.get('verificationSid')
+        # Check if verification code matches and is not expired
+        stored_code = member_data.get('verificationCode')
+        expiry_str = member_data.get('verificationExpiry')
         
-        if not verification_sid:
-            return jsonify({'error': 'No verification SID found for this member'}), 400
+        if not stored_code or not expiry_str:
+            return jsonify({'error': 'No verification code or expiry found for this member'}), 400
         
-        # Get Twilio credentials
-        twilio_account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
-        twilio_auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
-        
-        if not all([twilio_account_sid, twilio_auth_token]):
-            logger.warning("Twilio credentials not found.")
-            return jsonify({'error': 'Twilio credentials not fully configured'}), 500
-        
+        # Check if code is expired
         try:
-            # Initialize Twilio client
-            from twilio.rest import Client
-            twilio_client = Client(twilio_account_sid, twilio_auth_token)
+            expiry = datetime.fromisoformat(expiry_str)
+            if datetime.now() > expiry:
+                return jsonify({'error': 'Verification code has expired. Please request a new code.'}), 400
+        except Exception as e:
+            logger.error(f"Error parsing expiry date: {str(e)}")
+            return jsonify({'error': 'Invalid expiry format'}), 500
+        
+        # Check if code matches
+        if verification_code != stored_code:
+            return jsonify({'error': 'Invalid verification code'}), 400
+        
+        # Code matches and is not expired, mark as verified
+        try:
+            # Initialize WATI client
+            wati_client = get_wati_client()
             
-            # Get the Verify service SID
-            verify_service_sid = get_or_create_verify_service(twilio_client)
-            
-            # Format the phone number (must be E.164 format without the whatsapp: prefix)
+            # Format the phone number for WATI
             to_number = member_data.get('phone')
             # Remove whatsapp: prefix if present
             if to_number.startswith('whatsapp:'):
                 to_number = to_number[9:]
+            # Remove + prefix for WATI
+            if to_number.startswith('+'):
+                wati_phone = to_number[1:]
+            else:
+                wati_phone = to_number
             
-            # Check the verification code with Twilio Verify
+            # Get organization name
+            org_name = "Knowledge Hub"
+            org_doc = db.collection('organizations').document(organization_id).get()
+            if org_doc.exists:
+                org_data = org_doc.to_dict()
+                org_name = org_data.get('name', org_name)
+            
+            # Mark the member as verified
+            members_ref.document(member_id).update({
+                'whatsappVerified': True,
+                'status': 'active',
+                'verifiedAt': firestore.SERVER_TIMESTAMP,
+                'updatedAt': firestore.SERVER_TIMESTAMP,
+                'updatedBy': user_query[0].id
+            })
+            
+            # Send welcome message using template
             try:
-                logger.info(f"Checking verification code for {to_number}")
-                
-                # Create the verification check
-                verification_check = twilio_client.verify.v2.services(verify_service_sid).verification_checks.create(
-                    to=to_number,
-                    code=verification_code
-                )
-                
-                logger.info(f"Verification check result: {verification_check.status}")
-                
-                # Check if the verification was successful
-                if verification_check.status == "approved":
-                    # Mark the member as verified
-                    members_ref.document(member_id).update({
-                        'whatsappVerified': True,  # Keep this for backward compatibility
-                        'smsVerified': True,
-                        'status': 'active',
-                        'verifiedAt': firestore.SERVER_TIMESTAMP,
-                        'updatedAt': firestore.SERVER_TIMESTAMP,
-                        'updatedBy': user_query[0].id
-                    })
-                    
-                    return jsonify({
-                        'memberId': member_id,
-                        'status': 'verified'
-                    }), 200
-                else:
-                    return jsonify({'error': f'Verification failed with status: {verification_check.status}'}), 400
-                
+                wati_client.send_template_message(wati_phone, "welcome_message", [
+                    {"name": "1", "value": org_name}
+                ])
+                logger.info(f"Sent welcome template message to {wati_phone}")
             except Exception as e:
-                logger.error(f"Error checking verification code: {str(e)}")
-                # Log detailed error information
-                if hasattr(e, 'code'):
-                    logger.error(f"Twilio error code: {e.code}")
-                if hasattr(e, 'msg'):
-                    logger.error(f"Twilio error message: {e.msg}")
-                if hasattr(e, 'status'):
-                    logger.error(f"Twilio error status: {e.status}")
-                if hasattr(e, 'details'):
-                    logger.error(f"Twilio error details: {e.details}")
-                
-                return jsonify({'error': f'Failed to check verification code: {str(e)}'}), 500
+                logger.error(f"Error sending welcome template: {str(e)}")
+                # Fall back to session message
+                try:
+                    wati_client.send_session_message(
+                        wati_phone, 
+                        f"Welcome to the {org_name} Knowledge Hub! You can ask questions about your organization's knowledge base here."
+                    )
+                    logger.info(f"Sent welcome session message to {wati_phone}")
+                except Exception as session_error:
+                    logger.error(f"Error sending welcome session message: {str(session_error)}")
+                    # Continue even if welcome message fails
+            
+            return jsonify({
+                'memberId': member_id,
+                'status': 'verified'
+            }), 200
             
         except Exception as e:
-            logger.error(f"Error initializing Twilio client: {str(e)}")
-            return jsonify({'error': f'Failed to initialize Twilio client: {str(e)}'}), 500
+            logger.error(f"Error during verification: {str(e)}")
+            return jsonify({'error': f'Failed to complete verification: {str(e)}'}), 500
         
     except Exception as e:
         logger.error(f"Error verifying code: {str(e)}")
