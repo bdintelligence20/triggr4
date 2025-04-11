@@ -69,18 +69,39 @@ class WATIClient:
     # Messaging
     def send_session_message(self, phone_number: str, message_text: str) -> Dict:
         """Send a session message to a contact."""
+        # Ensure message text is not empty
+        if not message_text or message_text.strip() == "":
+            logger.warning("Attempted to send empty message, adding placeholder text")
+            message_text = "No message content available."
+            
         data = {
             "messageText": message_text
         }
+        
+        logger.info(f"Sending session message to {phone_number}: {message_text[:50]}...")
         return self._make_request("POST", f"sendSessionMessage/{phone_number}", data=data)
     
     def send_template_message(self, phone_number: str, template_name: str, parameters: List[Dict]) -> Dict:
         """Send a template message to a contact."""
+        # Validate parameters to ensure no empty values
+        validated_parameters = []
+        for param in parameters:
+            if 'name' in param and 'value' in param:
+                # Ensure value is not empty
+                if not param['value'] or str(param['value']).strip() == "":
+                    logger.warning(f"Empty parameter value for {param['name']}, using placeholder")
+                    param['value'] = "No content available"
+                validated_parameters.append(param)
+            else:
+                logger.warning(f"Skipping invalid parameter: {param}")
+        
         data = {
             "template_name": template_name,
             "broadcast_name": template_name,
-            "parameters": parameters
+            "parameters": validated_parameters
         }
+        
+        logger.info(f"Sending template message '{template_name}' to {phone_number} with {len(validated_parameters)} parameters")
         return self._make_request("POST", "sendTemplateMessage", data=data, params={"whatsappNumber": phone_number})
     
     def send_template_messages_bulk(self, template_name: str, receivers: List[Dict]) -> Dict:

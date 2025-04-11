@@ -179,7 +179,13 @@ def sanitize_ai_response(text):
     text = re.sub(r' {2,}', ' ', text)
     
     # Ensure there are no leading/trailing whitespaces
-    return text.strip()
+    text = text.strip()
+    
+    # Final check to ensure we're not returning empty content
+    if not text:
+        return "I couldn't generate a response. Please try asking your question differently or contact your administrator."
+        
+    return text
 
 def handle_verification_code(from_number, message):
     """Handle verification code messages."""
