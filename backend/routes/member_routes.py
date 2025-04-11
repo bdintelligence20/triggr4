@@ -395,6 +395,10 @@ def send_whatsapp_verification():
             
             # Store verification code in Firestore with expiration
             verification_expiry = datetime.now() + timedelta(minutes=15)
+            
+            # Log verification details for debugging
+            logger.info(f"Storing verification code for member {member_id}: code={verification_code}, expires={verification_expiry.isoformat()}")
+            
             members_ref.document(member_id).update({
                 'verificationCode': verification_code,
                 'verificationExpiry': verification_expiry.isoformat(),

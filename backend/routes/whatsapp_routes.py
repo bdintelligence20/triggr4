@@ -233,7 +233,7 @@ def handle_verification_code(from_number, message):
         return True
     
     # Check if verification was sent
-    if not member_data.get('verificationSent'):
+    if not (member_data.get('verificationSent') or member_data.get('verificationSentAt')):
         logger.warning(f"No verification was sent to {phone_number} but received code: {verification_code}")
         send_whatsapp_message(wati_phone, "No verification was requested for this number. Please contact your organization administrator.")
         return True
@@ -241,6 +241,9 @@ def handle_verification_code(from_number, message):
     # Check if verification code matches and is not expired
     stored_code = member_data.get('verificationCode')
     expiry_str = member_data.get('verificationExpiry')
+    
+    # Log member data for debugging
+    logger.info(f"Member data for verification: {json.dumps({k: v for k, v in member_data.items() if k in ['verificationCode', 'verificationExpiry', 'verificationSent', 'verificationSentAt', 'whatsappVerified']})}")
     
     if not stored_code or not expiry_str:
         logger.warning(f"No verification code or expiry found for {phone_number}")
@@ -509,12 +512,32 @@ def wati_webhook():
         logger.info(f"Received WATI webhook: {data}")
         
         # Extract message data - WATI webhook format
-        if not data or 'text' not in data:
-            logger.warning("No text in webhook data")
+        if not data:
+            logger.warning("No data in webhook")
             return jsonify({'status': 'success'}), 200
+            
+        # Handle different webhook event types
+        event_type = data.get('eventType', '')
         
-        message_body = data.get('text', {}).get('body', '').strip()
-        from_number = data.get('waId', '')
+        # For template message events, we don't need to process them
+        if event_type == 'templateMessageSent':
+            logger.info(f"Received template message event, no action needed")
+            return jsonify({'status': 'success'}), 200
+            
+        # For incoming messages
+        if event_type == 'message':
+            # Extract the text directly - in WATI format 'text' is a string, not an object
+            message_body = data.get('text', '').strip()
+            from_number = data.get('waId', '')
+        else:
+            # For other event types or direct text field
+            if 'text' in data and isinstance(data['text'], str):
+                message_body = data['text'].strip()
+            else:
+                logger.warning("No text in webhook data or unsupported format")
+                return jsonify({'status': 'success'}), 200
+                
+            from_number = data.get('waId', '')
         
         if not message_body or not from_number:
             logger.warning("Missing message body or sender number")
@@ -731,10 +754,9 @@ def webhook():
         
         # Create a WATI-like webhook payload
         wati_data = {
-            'text': {
-                'body': message_body
-            },
-            'waId': from_number
+            'text': message_body,
+            'waId': from_number,
+            'eventType': 'message'
         }
         
         # Call the WATI webhook handler with the transformed data
