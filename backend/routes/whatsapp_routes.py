@@ -49,21 +49,51 @@ def send_whatsapp_message(to_number, message_body):
     if to_number.startswith('+'):
         to_number = to_number[1:]
     
-    logger.info(f"Sending WhatsApp message to {to_number}")
+    # Ensure message body is not empty
+    if not message_body or message_body.strip() == "":
+        message_body = "No message content available."
+        logger.warning(f"Empty message body provided to send_whatsapp_message, using placeholder")
+    
+    # Ensure message body is a string
+    if not isinstance(message_body, str):
+        message_body = str(message_body)
+        logger.warning(f"Non-string message body provided, converted to string")
+    
+    logger.info(f"Sending WhatsApp message to {to_number}, length: {len(message_body)}")
     
     try:
         # Split the message semantically if it exceeds the max_length
         if len(message_body) > max_length:
+            logger.info(f"Message exceeds max length ({len(message_body)} > {max_length}), splitting into chunks")
             chunks = split_message_semantically(message_body, max_length=max_length)
-            for chunk in chunks:
-                wati_client.send_session_message(to_number, chunk)
+            logger.info(f"Split message into {len(chunks)} chunks")
+            
+            for i, chunk in enumerate(chunks):
+                logger.info(f"Sending chunk {i+1}/{len(chunks)}, length: {len(chunk)}")
+                # Add chunk indicator for multiple messages
+                if len(chunks) > 1:
+                    chunk = f"[Part {i+1}/{len(chunks)}] {chunk}"
+                response = wati_client.send_session_message(to_number, chunk)
+                logger.info(f"Chunk {i+1} sent, response: {response}")
         else:
-            wati_client.send_session_message(to_number, message_body)
+            response = wati_client.send_session_message(to_number, message_body)
+            logger.info(f"Message sent, response: {response}")
         
         return jsonify({'status': 'success'}), 200
     except Exception as e:
         logger.error(f"Error sending WhatsApp message: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        
+        # Try a direct approach as fallback
+        try:
+            logger.info("Trying fallback method for sending message")
+            # Create a very simple message as fallback
+            simple_message = "Message from Knowledge Hub. Please check the web interface for complete information."
+            wati_client.send_session_message(to_number, simple_message)
+            logger.info("Fallback message sent successfully")
+            return jsonify({'status': 'partial_success', 'message': 'Sent fallback message'}), 200
+        except Exception as fallback_error:
+            logger.error(f"Fallback also failed: {str(fallback_error)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
 
 def send_whatsapp_template_message(to_number, template_name, parameters):
     """
@@ -80,11 +110,24 @@ def send_whatsapp_template_message(to_number, template_name, parameters):
     if to_number.startswith('+'):
         to_number = to_number[1:]
     
+    # Validate parameters
+    validated_parameters = []
+    for param in parameters:
+        if 'name' in param and 'value' in param:
+            # Ensure value is not empty
+            if not param['value'] or str(param['value']).strip() == "":
+                logger.warning(f"Empty parameter value for {param['name']}, using placeholder")
+                param['value'] = "No content available"
+            validated_parameters.append(param)
+        else:
+            logger.warning(f"Skipping invalid parameter: {param}")
+    
     logger.info(f"Sending template message '{template_name}' to {to_number}")
-    logger.info(f"Template parameters: {parameters}")
+    logger.info(f"Template parameters: {validated_parameters}")
     
     try:
-        wati_client.send_template_message(to_number, template_name, parameters)
+        response = wati_client.send_template_message(to_number, template_name, validated_parameters)
+        logger.info(f"Template message response: {response}")
         return jsonify({'status': 'success'}), 200
     except Exception as e:
         error_message = str(e)
@@ -94,20 +137,27 @@ def send_whatsapp_template_message(to_number, template_name, parameters):
         try:
             # Extract the main content from parameters if possible
             content = None
-            for param in parameters:
+            for param in validated_parameters:
                 if param.get('name') == '1' or param.get('name') == '2':
                     content = param.get('value')
                     if content:
                         break
             
             if not content:
-                content = "Sorry, we couldn't send the template message. Please contact support."
+                content = f"Message from {template_name} template: Sorry, we couldn't send the template message properly."
             
-            logger.info(f"Falling back to plain text message")
+            logger.info(f"Falling back to plain text message: {content[:50]}...")
             return send_whatsapp_message(to_number, content)
         except Exception as fallback_error:
             logger.error(f"Error sending fallback message: {str(fallback_error)}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
+            
+            # Last resort - try a very simple message
+            try:
+                simple_message = "Message from Knowledge Hub. Please check the web interface for complete information."
+                send_whatsapp_message(to_number, simple_message)
+                return jsonify({'status': 'partial_success', 'message': 'Sent simple fallback message'}), 200
+            except:
+                return jsonify({'status': 'error', 'message': str(e)}), 500
 
 def get_member_by_phone(phone_number):
     """Get member data by phone number."""

@@ -1,4 +1,5 @@
 import os
+import json
 import requests
 import logging
 from typing import Dict, List, Optional, Union, Any
@@ -14,7 +15,7 @@ class WATIClient:
             'Content-Type': 'application/json'
         }
     
-    def _make_request(self, method: str, endpoint: str, data: Optional[Dict] = None, params: Optional[Dict] = None) -> Dict:
+    def _make_request(self, method: str, endpoint: str, data: Optional[Dict] = None, params: Optional[Dict] = None, form_data: bool = False) -> Dict:
         """Make a request to the WATI API."""
         url = f"{self.api_url}/api/v1/{endpoint}"
         try:
@@ -23,14 +24,27 @@ class WATIClient:
                 logger.info(f"Request data: {data}")
             if params:
                 logger.info(f"Request params: {params}")
-                
-            response = requests.request(
-                method=method,
-                url=url,
-                headers=self.headers,
-                json=data,
-                params=params
-            )
+            
+            # Use form data or JSON based on the parameter
+            if form_data:
+                logger.info(f"Using form data format")
+                headers = self.headers.copy()
+                headers['Content-Type'] = 'application/x-www-form-urlencoded'
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    data=data,  # Use data parameter for form data
+                    params=params
+                )
+            else:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    headers=self.headers,
+                    json=data,  # Use json parameter for JSON data
+                    params=params
+                )
             
             logger.info(f"WATI API response status: {response.status_code}")
             
@@ -73,13 +87,40 @@ class WATIClient:
         if not message_text or message_text.strip() == "":
             logger.warning("Attempted to send empty message, adding placeholder text")
             message_text = "No message content available."
-            
-        data = {
+        
+        logger.info(f"Sending session message to {phone_number}: {message_text[:50]}...")
+        
+        # According to the Postman collection, this should be form data, not JSON
+        form_data = {
             "messageText": message_text
         }
         
-        logger.info(f"Sending session message to {phone_number}: {message_text[:50]}...")
-        return self._make_request("POST", f"sendSessionMessage/{phone_number}", data=data)
+        # Try with form data first (this is the format shown in the Postman collection)
+        try:
+            return self._make_request("POST", f"sendSessionMessage/{phone_number}", data=form_data, form_data=True)
+        except Exception as e:
+            logger.warning(f"Failed to send using form data format: {str(e)}")
+            
+            # Try alternative approaches if form data fails
+            try:
+                # Try with JSON format
+                json_data = {
+                    "messageText": message_text
+                }
+                return self._make_request("POST", f"sendSessionMessage/{phone_number}", data=json_data)
+            except Exception as e2:
+                logger.warning(f"Failed with JSON format: {str(e2)}")
+                
+                # Try the text message endpoint as a last resort
+                try:
+                    alt_data = {
+                        "phone_number": phone_number,
+                        "message": message_text
+                    }
+                    return self._make_request("POST", "sendTextMessage", data=alt_data)
+                except Exception as e3:
+                    logger.warning(f"All message sending attempts failed: {str(e3)}")
+                    raise
     
     def send_template_message(self, phone_number: str, template_name: str, parameters: List[Dict]) -> Dict:
         """Send a template message to a contact."""
@@ -95,14 +136,52 @@ class WATIClient:
             else:
                 logger.warning(f"Skipping invalid parameter: {param}")
         
-        data = {
+        logger.info(f"Sending template message '{template_name}' to {phone_number} with {len(validated_parameters)} parameters")
+        
+        # According to the Postman collection, template messages use JSON format
+        json_data = {
             "template_name": template_name,
             "broadcast_name": template_name,
             "parameters": validated_parameters
         }
         
-        logger.info(f"Sending template message '{template_name}' to {phone_number} with {len(validated_parameters)} parameters")
-        return self._make_request("POST", "sendTemplateMessage", data=data, params={"whatsappNumber": phone_number})
+        # Try with the standard JSON format first
+        try:
+            return self._make_request("POST", "sendTemplateMessage", data=json_data, params={"whatsappNumber": phone_number})
+        except Exception as e:
+            logger.warning(f"Failed to send template message with standard format: {str(e)}")
+            
+            # Try with form data as an alternative
+            try:
+                # Convert parameters to a format that can be sent as form data
+                form_data = {
+                    "template_name": template_name,
+                    "broadcast_name": template_name,
+                    "parameters": json.dumps(validated_parameters)  # Convert list to JSON string
+                }
+                return self._make_request("POST", "sendTemplateMessage", data=form_data, form_data=True, params={"whatsappNumber": phone_number})
+            except Exception as e2:
+                logger.warning(f"Failed with form data format: {str(e2)}")
+                
+                # Try alternative JSON formats
+                try:
+                    alt_data = {
+                        "templateName": template_name,  # Try camelCase
+                        "broadcastName": template_name,
+                        "parameters": validated_parameters
+                    }
+                    return self._make_request("POST", "sendTemplateMessage", data=alt_data, params={"whatsappNumber": phone_number})
+                except Exception as e3:
+                    logger.warning(f"Failed with alternative JSON format: {str(e3)}")
+                    
+                    # Fall back to session message as last resort
+                    message_text = f"Template message ({template_name}): "
+                    for param in validated_parameters:
+                        if param.get('name') and param.get('value'):
+                            message_text += f"{param.get('value')} "
+                    
+                    logger.info(f"Falling back to session message: {message_text[:50]}...")
+                    return self.send_session_message(phone_number, message_text)
     
     def send_template_messages_bulk(self, template_name: str, receivers: List[Dict]) -> Dict:
         """Send template messages to multiple contacts."""
