@@ -622,6 +622,11 @@ def wati_webhook():
             logger.info(f"Received template message event, no action needed")
             return jsonify({'status': 'success'}), 200
             
+        # For message status updates, we don't need to process them
+        if event_type == 'messageStatusUpdate' or event_type == 'messageStatus':
+            logger.info(f"Received message status update, no action needed")
+            return jsonify({'status': 'success'}), 200
+            
         # For incoming messages
         if event_type == 'message':
             # Extract the text directly - in WATI format 'text' is a string, not an object
@@ -629,10 +634,19 @@ def wati_webhook():
             from_number = data.get('waId', '')
         else:
             # For other event types or direct text field
-            if 'text' in data and isinstance(data['text'], str):
-                message_body = data['text'].strip()
+            if 'text' in data:
+                if isinstance(data['text'], str):
+                    message_body = data['text'].strip()
+                else:
+                    # Try to convert to string if possible
+                    try:
+                        message_body = str(data['text']).strip()
+                        logger.warning(f"Converted non-string text to string: {message_body}")
+                    except:
+                        logger.warning("Could not convert text field to string")
+                        return jsonify({'status': 'success'}), 200
             else:
-                logger.warning("No text in webhook data or unsupported format")
+                logger.warning("No text in webhook data")
                 return jsonify({'status': 'success'}), 200
                 
             from_number = data.get('waId', '')

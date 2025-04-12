@@ -100,6 +100,11 @@ def create_app():
     
     # Define a custom key function for organization-aware rate limiting
     def get_tenant_limit_key():
+        # Skip authentication check for webhook routes
+        if request.path.endswith('/wati-webhook') or request.path.endswith('/webhook'):
+            # Use IP address for webhook routes
+            return get_remote_address()
+            
         # Get organization ID from the authenticated user
         organization_id = utils.get_user_organization_id()
         # Fallback to IP address if organization ID is not available
@@ -115,6 +120,9 @@ def create_app():
         default_limits=["300 per day", "60 per hour"],
         storage_uri="memory://",
     )
+    
+    # Exempt webhook routes from rate limiting
+    limiter.exempt(lambda: request.path.endswith('/wati-webhook') or request.path.endswith('/webhook'))
     
     # Configure file uploads
     app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
