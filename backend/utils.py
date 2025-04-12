@@ -12,6 +12,10 @@ def allowed_file(filename: str, allowed_extensions: set) -> bool:
 
 def get_user_id():
     """Get the user ID for the authenticated user."""
+    # Skip authentication check for webhook routes
+    if request.path.endswith('/wati-webhook') or request.path.endswith('/webhook'):
+        return None
+        
     auth_header = request.headers.get('Authorization')
     
     if not auth_header or not auth_header.startswith('Bearer '):
@@ -33,6 +37,10 @@ def get_user_id():
 
 def get_user_organization_id():
     """Get the organization ID for the authenticated user."""
+    # Skip authentication check for webhook routes
+    if request.path.endswith('/wati-webhook') or request.path.endswith('/webhook'):
+        return None
+        
     auth_header = request.headers.get('Authorization')
     
     if not auth_header or not auth_header.startswith('Bearer '):

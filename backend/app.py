@@ -100,12 +100,11 @@ def create_app():
     
     # Define a custom key function for organization-aware rate limiting
     def get_tenant_limit_key():
-        # Skip authentication check for webhook routes
+        # For webhook routes, use IP address only
         if request.path.endswith('/wati-webhook') or request.path.endswith('/webhook'):
-            # Use IP address for webhook routes
             return get_remote_address()
             
-        # Get organization ID from the authenticated user
+        # For all other routes, try to get organization ID
         organization_id = utils.get_user_organization_id()
         # Fallback to IP address if organization ID is not available
         if not organization_id:
