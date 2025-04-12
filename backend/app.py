@@ -132,6 +132,7 @@ def create_app():
     from routes.whatsapp_routes import whatsapp_bp
     from routes.utility_routes import utility_bp
     from routes.member_routes import member_bp
+    from routes.mcp_routes import mcp_bp
 
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(document_bp)
@@ -139,6 +140,7 @@ def create_app():
     app.register_blueprint(whatsapp_bp)
     app.register_blueprint(utility_bp)
     app.register_blueprint(member_bp)
+    app.register_blueprint(mcp_bp)
 
     return app
 

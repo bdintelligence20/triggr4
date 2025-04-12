@@ -7,7 +7,7 @@ from flask import Blueprint, request, jsonify
 from firebase_admin import firestore
 from rag_system import RAGSystem
 from utils import split_message_semantically
-from datetime import datetime
+from datetime import datetime, timedelta
 from wati_client import get_wati_client
 
 # Configure logging
@@ -18,6 +18,13 @@ whatsapp_bp = Blueprint('whatsapp', __name__)
 
 # Get database instance
 db = firestore.client()
+
+# Message deduplication cache
+# Store message IDs with timestamps to prevent processing duplicates
+# Format: {message_id: timestamp}
+processed_messages = {}
+# How long to keep messages in the deduplication cache (in hours)
+MESSAGE_CACHE_HOURS = 24
 
 # Get environment variables
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -558,11 +565,32 @@ def send_bulk_message():
         logger.error(f"Error sending bulk message: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+# Clean up old entries from the message deduplication cache
+def clean_message_cache():
+    """Remove old entries from the message deduplication cache."""
+    current_time = datetime.now()
+    expired_keys = []
+    
+    for message_id, timestamp in processed_messages.items():
+        # Check if the entry is older than MESSAGE_CACHE_HOURS
+        if current_time - timestamp > timedelta(hours=MESSAGE_CACHE_HOURS):
+            expired_keys.append(message_id)
+    
+    # Remove expired keys
+    for key in expired_keys:
+        processed_messages.pop(key, None)
+    
+    if expired_keys:
+        logger.info(f"Cleaned {len(expired_keys)} expired entries from message cache")
+
 # WATI webhook handler
 @whatsapp_bp.route('/wati-webhook', methods=['POST'])
 def wati_webhook():
     """Handle incoming WhatsApp messages from WATI."""
     try:
+        # Clean up old entries from the message cache
+        clean_message_cache()
+        
         # Get the webhook data
         data = request.json
         logger.info(f"Received WATI webhook: {data}")
@@ -571,6 +599,20 @@ def wati_webhook():
         if not data:
             logger.warning("No data in webhook")
             return jsonify({'status': 'success'}), 200
+        
+        # Get message ID for deduplication
+        message_id = data.get('id')
+        if not message_id:
+            logger.warning("No message ID in webhook data")
+            # Continue processing as we can't deduplicate without an ID
+        else:
+            # Check if we've already processed this message
+            if message_id in processed_messages:
+                logger.info(f"Skipping already processed message: {message_id}")
+                return jsonify({'status': 'success'}), 200
+            
+            # Mark this message as processed
+            processed_messages[message_id] = datetime.now()
             
         # Handle different webhook event types
         event_type = data.get('eventType', '')
@@ -695,13 +737,41 @@ def wati_webhook():
             # Create a queue to hold the response
             response_queue = queue.Queue()
             
+            # Get conversation history for this member
+            conversation_history = ""
+            try:
+                # Get the last 5 queries for this member
+                history_query = db.collection('queries') \
+                    .where('memberId', '==', member['id']) \
+                    .where('status', '==', 'completed') \
+                    .order_by('createdAt', direction=firestore.Query.DESCENDING) \
+                    .limit(5)
+                
+                history_docs = list(history_query.stream())
+                
+                # Format the history in the expected format for the RAG system
+                if history_docs:
+                    history_items = []
+                    for doc in reversed(history_docs):  # Oldest first
+                        doc_data = doc.to_dict()
+                        if 'query' in doc_data and 'response' in doc_data:
+                            history_items.append(f"User: {doc_data['query']}")
+                            history_items.append(f"AI: {doc_data['response']}")
+                    
+                    conversation_history = "\n".join(history_items)
+                    logger.info(f"Retrieved conversation history with {len(history_docs)} previous exchanges")
+            except Exception as history_error:
+                logger.warning(f"Error retrieving conversation history: {str(history_error)}")
+                # Continue without history if there's an error
+            
             # Define a function to run the query in a separate thread
             def run_query():
                 try:
                     result = rag.query(
-                        message_body,
-                        organization_id=organization_id,
-                        user_id=member['id']
+                        user_query=message_body,  # Use the correct parameter name
+                        user_id=member['id'],
+                        history=conversation_history
+                        # Don't pass organization_id again - it's already set during initialization
                     )
                     response_queue.put(("success", result))
                 except Exception as e:
@@ -800,10 +870,24 @@ def webhook():
         # Get the message body and sender
         message_body = form_data.get('Body', '').strip()
         from_number = form_data.get('From', '')
+        message_sid = form_data.get('MessageSid')  # Twilio's message ID
         
         if not message_body or not from_number:
             logger.warning("Missing message body or sender number")
             return jsonify({'status': 'success'}), 200
+        
+        # Check for message deduplication if we have a message ID
+        if message_sid:
+            # Clean up old entries from the message cache
+            clean_message_cache()
+            
+            # Check if we've already processed this message
+            if message_sid in processed_messages:
+                logger.info(f"Skipping already processed Twilio message: {message_sid}")
+                return jsonify({'status': 'success'}), 200
+            
+            # Mark this message as processed
+            processed_messages[message_sid] = datetime.now()
         
         # Redirect to WATI webhook handler
         logger.info(f"Redirecting legacy Twilio webhook to WATI handler")
@@ -812,7 +896,8 @@ def webhook():
         wati_data = {
             'text': message_body,
             'waId': from_number,
-            'eventType': 'message'
+            'eventType': 'message',
+            'id': message_sid  # Include the message ID for deduplication in the WATI handler
         }
         
         # Call the WATI webhook handler with the transformed data
