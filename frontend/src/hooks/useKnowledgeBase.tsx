@@ -40,28 +40,23 @@ export const useKnowledgeBase = () => {
       isLoadingRef.current = true;
       setIsLoading(true);
       
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch(`${API_URL}/documents`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await import('../services/api').then(api => api.fetchDocuments());
       
-      if (!response.ok) {
-        console.error('Failed to load documents, status:', response.status);
-        throw new Error(`Failed to load documents: ${response.status}`);
+      if (response.error) {
+        console.error('Failed to load documents:', response.error);
+        throw new Error(`Failed to load documents: ${response.error}`);
       }
       
-      const data = await response.json();
-      if (data.documents && Array.isArray(data.documents)) {
+      if (response.data && response.data.documents && Array.isArray(response.data.documents)) {
+        const data = response.data;
         const loadedItems = data.documents.map((doc: any) => ({
           id: doc.id,
           title: doc.title,
           category: (doc.category === 'general' || doc.category === 'documents') ? 'hrhub' : doc.category,
           createdAt: new Date(doc.created_at || Date.now()),
-          type: doc.file_type === 'pdf' ? 'pdf' : 
-                doc.file_type === 'doc' ? 'doc' : 
-                doc.file_type === 'csv' ? 'csv' : 'text',
+          type: doc.file_type === 'pdf' ? 'pdf' as const : 
+                doc.file_type === 'doc' ? 'doc' as const : 
+                doc.file_type === 'csv' ? 'csv' as const : 'text' as const,
           fileSize: doc.word_count ? `${doc.word_count} words` : undefined,
           fileUrl: doc.file_url,
           processing_status: doc.processing_status,
@@ -89,17 +84,10 @@ export const useKnowledgeBase = () => {
       setIsLoading(true);
       
       // Call API to delete
-      const token = localStorage.getItem('auth_token');
-      const response = await fetch(`${API_URL}/delete/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await import('../services/api').then(api => api.deleteDocument(id));
       
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to delete item');
+      if (response.error) {
+        throw new Error(response.error || 'Failed to delete item');
       }
       
       // Remove from local state

@@ -21,35 +21,12 @@ const KnowledgeGrid: React.FC = () => {
   } = useAppContext();
 
   const { fileInputRef, handleFileUpload } = useFileUpload();
+  const { deleteKnowledgeItem } = useKnowledgeBase();
 
   const handleDeleteKnowledgeItem = async (id: string) => {
-    try {
-      setIsLoading(true);
-      
-      // Call API to delete
-      const response = await fetch(`${API_URL}/delete/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-        }
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to delete item');
-      }
-      
-      // Remove from local state
-      const updatedItems = filteredKnowledgeItems.filter(item => item.id !== id);
-      setKnowledgeItems(updatedItems);
-      
-      // Show notification
+    const success = await deleteKnowledgeItem(id);
+    if (success) {
       showNotification("Item deleted successfully");
-    } catch (err) {
-      console.error('Error deleting knowledge item:', err);
-      setError(`Failed to delete: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    } finally {
-      setIsLoading(false);
     }
   };
 

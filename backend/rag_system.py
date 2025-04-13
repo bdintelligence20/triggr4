@@ -281,6 +281,29 @@ class RAGSystem:
         # Combine preserved and remaining lines
         return '\n'.join(remaining_lines + preserved_lines)
 
+    def _is_complex_query(self, query):
+        """Detect if this is a complex query that would benefit from agent orchestration."""
+        complex_patterns = [
+            r"(?i)compare .+ and",
+            r"(?i)what are the pros and cons",
+            r"(?i)analyze .+ from multiple perspectives",
+            r"(?i)summarize .+ different viewpoints",
+            r"(?i)explain the relationship between",
+            r"(?i)what are the different approaches",
+            r"(?i)how does .+ contrast with",
+        ]
+        
+        for pattern in complex_patterns:
+            if re.search(pattern, query):
+                return True
+                
+        # Check for multiple questions in one query
+        question_marks = query.count('?')
+        if question_marks > 1:
+            return True
+            
+        return False
+        
     def query(self, user_query, namespace=None, top_k=5, category=None, stream_callback=None, history="", language="en", organization_id=None, user_id=None):
         """
         Query the system with a user question and return an AI response using retrieved context.
@@ -308,6 +331,65 @@ class RAGSystem:
         # Determine query complexity and adjust top_k
         is_follow_up = self._is_follow_up_question(user_query, history)
         is_clarification = self._is_clarification_question(user_query)
+        is_complex = self._is_complex_query(user_query)
+        
+        if is_complex:
+            logger.info("Detected complex query, using agent orchestration")
+            try:
+                from mcp_integration import MCPIntegration
+                import asyncio
+                
+                mcp = MCPIntegration()
+                orchestration_result = asyncio.run(mcp.orchestrate_agents(
+                    task=user_query,
+                    agent_preferences={
+                        "include": ["retriever", "reasoner", "generator"],
+                        "exclude": []
+                    },
+                    execution_parameters={
+                        "max_tokens": 1000,
+                        "temperature": 0.7
+                    }
+                ))
+                
+                if orchestration_result.get("response"):
+                    # Get sources for the response
+                    query_embedding = self.embedding_service.get_embedding(user_query)
+                    if query_embedding:
+                        effective_namespace = None
+                        if organization_id:
+                            effective_namespace = f"org_{organization_id}"
+                        elif self.organization_id:
+                            effective_namespace = f"org_{self.organization_id}"
+                        else:
+                            effective_namespace = namespace
+                            
+                        matched_docs = self.pinecone_client.query_vectors(
+                            query_embedding, 
+                            namespace=effective_namespace,
+                            top_k=5
+                        )
+                        
+                        # Format sources
+                        sources = []
+                        for doc in matched_docs:
+                            source_id = doc.get('source_id', 'unknown')
+                            sources.append({
+                                "id": source_id,
+                                "relevance_score": doc.get('score', 0)
+                            })
+                    else:
+                        sources = []
+                    
+                    return {
+                        "answer": orchestration_result["response"],
+                        "sources": sources,
+                        "agents_used": orchestration_result.get("agents_used", []),
+                        "reasoning_traces": orchestration_result.get("reasoning_traces", [])
+                    }
+            except Exception as e:
+                logger.warning(f"Agent orchestration failed, falling back to standard RAG: {str(e)}")
+                # Fall back to standard RAG if agent orchestration fails
         
         if is_clarification:
             effective_top_k = 2  # Minimal context for clarifications
@@ -418,6 +500,34 @@ class RAGSystem:
         
         context_text = "\n\n---\n\n".join(context_chunks)
         logger.info(f"Context prepared with {len(context_chunks)} chunks, {context_tokens} tokens")
+        
+        # For follow-up or clarification questions, use the MCP context manager
+        if is_follow_up or is_clarification:
+            try:
+                from mcp_integration import MCPIntegration
+                import asyncio
+                
+                logger.info("Using MCP context manager for follow-up/clarification question")
+                
+                mcp = MCPIntegration()
+                context_operation = asyncio.run(mcp.manage_context(
+                    operation="optimize",
+                    context_data={
+                        "query": user_query,
+                        "history": history,
+                        "current_context": context_text
+                    }
+                ))
+                
+                # Use the optimized context if available
+                if context_operation.get("operation_result", {}).get("success", False):
+                    optimized_context = context_operation.get("operation_result", {}).get("context", "")
+                    if optimized_context:
+                        context_text = optimized_context
+                        logger.info("Using optimized context from MCP")
+            except Exception as e:
+                logger.warning(f"MCP context management failed, using standard context: {str(e)}")
+                # Fall back to standard context if MCP context management fails
         
         # Smart history truncation
         history_tokens = count_tokens(history)

@@ -1,150 +1,225 @@
 """
 Agentic RAG MCP Server
 
-This module implements a Model Context Protocol (MCP) server for an enhanced
-Retrieval-Augmented Generation (RAG) system with agentic capabilities.
+This is the main entry point for the Agentic RAG MCP server.
+It initializes the server and connects it to the MCP client.
 """
 
 import os
+import sys
 import logging
 import asyncio
-from typing import Dict, Any, List, Optional
-
-from modelcontextprotocol.server import Server
-from modelcontextprotocol.server.stdio import StdioServerTransport
-from modelcontextprotocol.types import (
-    CallToolRequestSchema,
-    ErrorCode,
-    ListResourcesRequestSchema,
-    ListResourceTemplatesRequestSchema,
-    ListToolsRequestSchema,
-    McpError,
-    ReadResourceRequestSchema,
-)
-
-# Import components
-from .context_manager.context_window import UnifiedContextManager
-from .knowledge_store.vectorized_store import VectorizedKnowledgeStore
-from .relevance_engine.reranker import ContextualRelevanceEngine
-from .agent_orchestration.orchestrator import AgentOrchestrator
+import json
+from typing import Dict, List, Any, Optional, Union
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
 logger = logging.getLogger(__name__)
+
+# Import MCP components
+from context_manager.context_window import ContextManager
+from knowledge_store.vectorized_store import VectorizedStore
+from relevance_engine.reranker import RelevanceEngine
+from agent_orchestration.orchestrator import AgentOrchestrator
+
+# Environment variables
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
+PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "knowledge-hub-vectors")
+
+# Validate required environment variables
+if not OPENAI_API_KEY or not ANTHROPIC_API_KEY or not PINECONE_API_KEY:
+    missing = []
+    if not OPENAI_API_KEY:
+        missing.append("OPENAI_API_KEY")
+    if not ANTHROPIC_API_KEY:
+        missing.append("ANTHROPIC_API_KEY")
+    if not PINECONE_API_KEY:
+        missing.append("PINECONE_API_KEY")
+    logger.error(f"Missing required environment variables: {', '.join(missing)}")
+    sys.exit(1)
 
 class AgenticRAGServer:
     """
-    MCP server implementation for an enhanced agentic RAG system.
+    Agentic RAG MCP Server
     
-    This server provides tools and resources for advanced RAG capabilities including:
-    - Unified context management with dynamic context windows
-    - Enhanced vectorized knowledge store with multi-modal support
-    - Contextual relevance engine with semantic chunking
-    - Agent orchestration for multi-agent workflows
+    This server provides tools and resources for enhanced RAG capabilities:
+    - Dynamic context management
+    - Semantic chunking
+    - Relevance reranking
+    - Agent orchestration
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        """
-        Initialize the Agentic RAG MCP server with necessary components.
-        
-        Args:
-            config: Configuration dictionary for the server and its components
-        """
-        self.config = config or {}
-        
-        # Initialize core components
-        self.context_manager = UnifiedContextManager(self.config.get('context', {}))
-        self.knowledge_store = VectorizedKnowledgeStore(self.config.get('knowledge_store', {}))
-        self.relevance_engine = ContextualRelevanceEngine(self.config.get('relevance', {}))
-        self.agent_orchestrator = AgentOrchestrator(self.config.get('agents', {}))
-        
-        # Initialize MCP server
-        self.server = Server(
-            {
-                "name": "agentic-rag-server",
-                "version": "0.1.0",
-            },
-            {
-                "capabilities": {
-                    "resources": {},
-                    "tools": {},
-                }
-            }
+    def __init__(self):
+        """Initialize the server components."""
+        # Initialize components
+        self.context_manager = ContextManager()
+        self.vectorized_store = VectorizedStore(
+            pinecone_api_key=PINECONE_API_KEY,
+            pinecone_index_name=PINECONE_INDEX_NAME,
+            openai_api_key=OPENAI_API_KEY
+        )
+        self.relevance_engine = RelevanceEngine()
+        self.agent_orchestrator = AgentOrchestrator(
+            anthropic_api_key=ANTHROPIC_API_KEY,
+            openai_api_key=OPENAI_API_KEY
         )
         
-        # Set up request handlers
-        self._setup_tool_handlers()
-        self._setup_resource_handlers()
-        
-        # Error handling
-        self.server.onerror = lambda error: logger.error(f"[MCP Error] {error}")
+        logger.info("Agentic RAG MCP server initialized")
     
-    def _setup_tool_handlers(self):
-        """Set up handlers for MCP tools."""
-        # List available tools
-        self.server.set_request_handler(ListToolsRequestSchema, self._handle_list_tools)
+    async def list_resources(self) -> Dict[str, Any]:
+        """
+        List available resources.
         
-        # Handle tool calls
-        self.server.set_request_handler(CallToolRequestSchema, self._handle_call_tool)
+        Returns:
+            Dict containing the available resources.
+        """
+        return {
+            "resources": [
+                {
+                    "uri": "rag://agents/capabilities",
+                    "name": "Agent Capabilities",
+                    "mimeType": "application/json",
+                    "description": "Information about available agent capabilities",
+                },
+            ],
+        }
     
-    def _setup_resource_handlers(self):
-        """Set up handlers for MCP resources."""
-        # List available resources
-        self.server.set_request_handler(ListResourcesRequestSchema, self._handle_list_resources)
+    async def list_resource_templates(self) -> Dict[str, Any]:
+        """
+        List resource templates.
         
-        # List resource templates
-        self.server.set_request_handler(ListResourceTemplatesRequestSchema, self._handle_list_resource_templates)
-        
-        # Handle resource reads
-        self.server.set_request_handler(ReadResourceRequestSchema, self._handle_read_resource)
+        Returns:
+            Dict containing the resource templates.
+        """
+        return {
+            "resourceTemplates": [
+                {
+                    "uriTemplate": "rag://context/{contextId}",
+                    "name": "Context Window",
+                    "mimeType": "application/json",
+                    "description": "Access to a specific context window",
+                },
+            ],
+        }
     
-    async def _handle_list_tools(self, request):
-        """Handle listing available tools."""
+    async def read_resource(self, uri: str) -> Dict[str, Any]:
+        """
+        Read a resource.
+        
+        Args:
+            uri: The resource URI
+            
+        Returns:
+            Dict containing the resource contents
+            
+        Raises:
+            ValueError: If the URI is invalid or the resource is not found
+        """
+        # Handle agent capabilities resource
+        if uri == "rag://agents/capabilities":
+            return {
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": json.dumps({
+                            "retriever": ["information_retrieval", "document_search", "semantic_search"],
+                            "reasoner": ["logical_reasoning", "analysis", "inference", "planning"],
+                            "generator": ["response_generation", "summarization", "explanation"],
+                            "orchestrator": ["agent_coordination", "task_decomposition", "workflow_management"],
+                        }, indent=2),
+                    },
+                ],
+            }
+        
+        # Handle context window resources
+        context_match = uri.startswith("rag://context/")
+        if context_match:
+            context_id = uri[14:]  # Remove "rag://context/" prefix
+            try:
+                context = await self.context_manager.get_context(context_id)
+                return {
+                    "contents": [
+                        {
+                            "uri": uri,
+                            "mimeType": "application/json",
+                            "text": json.dumps(context, indent=2),
+                        },
+                    ],
+                }
+            except ValueError as e:
+                raise ValueError(f"Context not found: {context_id}")
+        
+        raise ValueError(f"Invalid URI: {uri}")
+    
+    async def list_tools(self) -> Dict[str, Any]:
+        """
+        List available tools.
+        
+        Returns:
+            Dict containing the available tools.
+        """
         return {
             "tools": [
                 {
                     "name": "query_knowledge_base",
-                    "description": "Query the knowledge base with advanced context management",
+                    "description": "Query the knowledge base with enhanced context management",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "query": {
                                 "type": "string",
-                                "description": "The user's question"
+                                "description": "Query string",
                             },
                             "conversation_history": {
                                 "type": "string",
-                                "description": "Previous conversation history"
+                                "description": "Previous conversation history",
                             },
                             "context_preferences": {
                                 "type": "object",
-                                "description": "Preferences for context management"
-                            }
+                                "description": "Context allocation preferences",
+                                "properties": {
+                                    "allocation": {
+                                        "type": "object",
+                                        "properties": {
+                                            "global": {"type": "number"},
+                                            "task": {"type": "number"},
+                                            "conversation": {"type": "number"},
+                                        },
+                                    },
+                                },
+                            },
                         },
-                        "required": ["query"]
-                    }
+                        "required": ["query"],
+                    },
                 },
                 {
                     "name": "process_document",
-                    "description": "Process a document with enhanced semantic chunking and multi-modal embedding",
+                    "description": "Process a document with enhanced semantic chunking",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "document_content": {
                                 "type": "string",
-                                "description": "The document content to process"
+                                "description": "Document content",
                             },
                             "metadata": {
                                 "type": "object",
-                                "description": "Document metadata"
+                                "description": "Document metadata",
                             },
                             "processing_preferences": {
                                 "type": "object",
-                                "description": "Preferences for document processing"
-                            }
+                                "description": "Processing preferences",
+                            },
                         },
-                        "required": ["document_content"]
-                    }
+                        "required": ["document_content"],
+                    },
                 },
                 {
                     "name": "manage_context",
@@ -154,16 +229,16 @@ class AgenticRAGServer:
                         "properties": {
                             "operation": {
                                 "type": "string",
-                                "description": "Context operation (add, remove, prioritize)",
-                                "enum": ["add", "remove", "prioritize", "clear"]
+                                "description": "Operation to perform (add, remove, optimize)",
+                                "enum": ["add", "remove", "optimize", "clear"],
                             },
                             "context_data": {
                                 "type": "object",
-                                "description": "Context data for the operation"
-                            }
+                                "description": "Context data",
+                            },
                         },
-                        "required": ["operation"]
-                    }
+                        "required": ["operation"],
+                    },
                 },
                 {
                     "name": "orchestrate_agents",
@@ -173,355 +248,276 @@ class AgenticRAGServer:
                         "properties": {
                             "task": {
                                 "type": "string",
-                                "description": "Task description"
+                                "description": "Task to perform",
                             },
                             "agent_preferences": {
                                 "type": "object",
-                                "description": "Agent selection preferences"
+                                "description": "Agent preferences",
+                                "properties": {
+                                    "include": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                    "exclude": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                },
                             },
                             "execution_parameters": {
                                 "type": "object",
-                                "description": "Parameters for execution"
-                            }
+                                "description": "Execution parameters",
+                            },
                         },
-                        "required": ["task"]
-                    }
-                }
-            ]
+                        "required": ["task"],
+                    },
+                },
+            ],
         }
     
-    async def _handle_call_tool(self, request):
-        """Handle tool calls."""
-        tool_name = request.params.name
-        arguments = request.params.arguments
-        
-        if tool_name == "query_knowledge_base":
-            return await self._handle_query_knowledge_base(arguments)
-        elif tool_name == "process_document":
-            return await self._handle_process_document(arguments)
-        elif tool_name == "manage_context":
-            return await self._handle_manage_context(arguments)
-        elif tool_name == "orchestrate_agents":
-            return await self._handle_orchestrate_agents(arguments)
-        
-        raise McpError(ErrorCode.MethodNotFound, f"Unknown tool: {tool_name}")
-    
-    async def _handle_query_knowledge_base(self, arguments):
+    async def call_tool(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle knowledge base queries with enhanced context management.
+        Call a tool.
         
         Args:
-            arguments: Query arguments including the query text, conversation history,
-                      and context preferences
-        
-        Returns:
-            Response with answer, sources, reasoning trace, and context usage
-        """
-        query = arguments.get("query")
-        history = arguments.get("conversation_history", "")
-        preferences = arguments.get("context_preferences", {})
-        
-        try:
-            # Process the query through our enhanced RAG pipeline
-            context = await self.context_manager.prepare_context(query, history, preferences)
-            relevant_docs = await self.knowledge_store.retrieve_documents(query, context)
-            ranked_docs = await self.relevance_engine.rerank_documents(query, relevant_docs, context)
-            response = await self.agent_orchestrator.generate_response(query, ranked_docs, context)
+            name: The tool name
+            arguments: The tool arguments
             
+        Returns:
+            Dict containing the tool result
+            
+        Raises:
+            ValueError: If the tool is unknown or the arguments are invalid
+        """
+        try:
+            if name == "query_knowledge_base":
+                return await self.handle_query_knowledge_base(arguments)
+            elif name == "process_document":
+                return await self.handle_process_document(arguments)
+            elif name == "manage_context":
+                return await self.handle_manage_context(arguments)
+            elif name == "orchestrate_agents":
+                return await self.handle_orchestrate_agents(arguments)
+            else:
+                raise ValueError(f"Unknown tool: {name}")
+        except Exception as e:
+            logger.error(f"Error calling tool {name}: {str(e)}")
             return {
                 "content": [
                     {
                         "type": "text",
-                        "text": response["answer"]
-                    }
+                        "text": f"Error calling tool {name}: {str(e)}",
+                    },
                 ],
-                "metadata": {
-                    "sources": response["sources"],
-                    "reasoning_trace": response["reasoning_trace"],
-                    "context_usage": response["context_usage"]
-                }
+                "isError": True,
             }
-        except Exception as e:
-            logger.error(f"Error processing query: {str(e)}")
-            raise McpError(ErrorCode.InternalError, f"Error processing query: {str(e)}")
     
-    async def _handle_process_document(self, arguments):
+    async def handle_query_knowledge_base(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle document processing with enhanced semantic chunking.
+        Handle query_knowledge_base tool.
         
         Args:
-            arguments: Document processing arguments including content, metadata,
-                      and processing preferences
-        
+            arguments: The tool arguments
+            
         Returns:
-            Processing results including vector counts and document summary
+            Dict containing the query result
+        """
+        query = arguments.get("query")
+        conversation_history = arguments.get("conversation_history", "")
+        context_preferences = arguments.get("context_preferences", {})
+        
+        if not query:
+            raise ValueError("Query is required")
+        
+        # Get relevant documents from vector store
+        documents = await self.vectorized_store.search(query)
+        
+        # Apply relevance engine to rerank documents
+        reranked_documents = await self.relevance_engine.rerank(query, documents, conversation_history)
+        
+        # Optimize context window
+        context = await self.context_manager.optimize_context(
+            query,
+            "\n\n".join([doc.get("text", "") for doc in reranked_documents]),
+            conversation_history,
+            context_preferences
+        )
+        
+        # Generate response using the orchestrator
+        response = await self.agent_orchestrator.generate_response(query, context.get("operation_result", {}).get("context", ""), conversation_history)
+        
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": response.get("answer", ""),
+                },
+            ],
+            "metadata": {
+                "sources": response.get("sources", []),
+                "reasoning_trace": response.get("reasoning_trace", []),
+                "context_usage": response.get("context_usage", {}),
+                "confidence": response.get("confidence", 0.0),
+            },
+        }
+    
+    async def handle_process_document(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle process_document tool.
+        
+        Args:
+            arguments: The tool arguments
+            
+        Returns:
+            Dict containing the processing result
         """
         document_content = arguments.get("document_content")
         metadata = arguments.get("metadata", {})
-        preferences = arguments.get("processing_preferences", {})
+        processing_preferences = arguments.get("processing_preferences", {})
         
-        try:
-            # Process the document through our enhanced pipeline
-            result = await self.knowledge_store.process_document(
-                document_content, metadata, preferences
-            )
-            
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Document processed successfully: {result['vectors_stored']} vectors stored"
-                    }
-                ],
-                "metadata": {
-                    "document_id": result["document_id"],
-                    "vectors_stored": result["vectors_stored"],
-                    "summary": result["summary"],
-                    "processing_stats": result["processing_stats"]
-                }
-            }
-        except Exception as e:
-            logger.error(f"Error processing document: {str(e)}")
-            raise McpError(ErrorCode.InternalError, f"Error processing document: {str(e)}")
+        if not document_content:
+            raise ValueError("Document content is required")
+        
+        # Process document with semantic chunking
+        result = await self.vectorized_store.process_document(
+            document_content,
+            metadata,
+            processing_preferences
+        )
+        
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Document processed successfully. ID: {result.get('document_id', '')}",
+                },
+            ],
+            "metadata": {
+                "document_id": result.get("document_id", ""),
+                "vectors_stored": result.get("vectors_stored", 0),
+                "summary": result.get("summary", ""),
+                "processing_stats": result.get("processing_stats", {}),
+            },
+        }
     
-    async def _handle_manage_context(self, arguments):
+    async def handle_manage_context(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle context management operations.
+        Handle manage_context tool.
         
         Args:
-            arguments: Context management arguments including operation and context data
-        
+            arguments: The tool arguments
+            
         Returns:
-            Updated context status and token usage statistics
+            Dict containing the operation result
         """
         operation = arguments.get("operation")
         context_data = arguments.get("context_data", {})
         
-        try:
-            # Perform the context management operation
-            result = await self.context_manager.manage_context(operation, context_data)
-            
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Context {operation} operation completed successfully"
-                    }
-                ],
-                "metadata": {
-                    "context_size": result["context_size"],
-                    "token_usage": result["token_usage"],
-                    "operation_result": result["operation_result"]
-                }
-            }
-        except Exception as e:
-            logger.error(f"Error managing context: {str(e)}")
-            raise McpError(ErrorCode.InternalError, f"Error managing context: {str(e)}")
+        if not operation:
+            raise ValueError("Operation is required")
+        
+        # Perform context operation
+        result = await self.context_manager.perform_operation(operation, context_data)
+        
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Context operation '{operation}' completed successfully",
+                },
+            ],
+            "metadata": {
+                "context_size": result.get("context_size", {}),
+                "token_usage": result.get("token_usage", {}),
+                "operation_result": result.get("operation_result", {}),
+            },
+        }
     
-    async def _handle_orchestrate_agents(self, arguments):
+    async def handle_orchestrate_agents(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle agent orchestration for complex tasks.
+        Handle orchestrate_agents tool.
         
         Args:
-            arguments: Agent orchestration arguments including task description,
-                      agent preferences, and execution parameters
-        
+            arguments: The tool arguments
+            
         Returns:
-            Combined agent responses, reasoning traces, and confidence scores
+            Dict containing the orchestration result
         """
         task = arguments.get("task")
         agent_preferences = arguments.get("agent_preferences", {})
         execution_parameters = arguments.get("execution_parameters", {})
         
-        try:
-            # Orchestrate multiple agents for the task
-            result = await self.agent_orchestrator.orchestrate_task(
-                task, agent_preferences, execution_parameters
-            )
-            
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": result["response"]
-                    }
-                ],
-                "metadata": {
-                    "agents_used": result["agents_used"],
-                    "confidence_scores": result["confidence_scores"],
-                    "reasoning_traces": result["reasoning_traces"],
-                    "execution_stats": result["execution_stats"]
-                }
-            }
-        except Exception as e:
-            logger.error(f"Error orchestrating agents: {str(e)}")
-            raise McpError(ErrorCode.InternalError, f"Error orchestrating agents: {str(e)}")
-    
-    async def _handle_list_resources(self, request):
-        """Handle listing available resources."""
+        if not task:
+            raise ValueError("Task is required")
+        
+        # Orchestrate agents
+        result = await self.agent_orchestrator.orchestrate(
+            task,
+            agent_preferences,
+            execution_parameters
+        )
+        
         return {
-            "resources": [
+            "content": [
                 {
-                    "uri": "rag://stats/global",
-                    "name": "Global Knowledge Base Statistics",
-                    "mimeType": "application/json",
-                    "description": "Statistics about the global knowledge base"
+                    "type": "text",
+                    "text": result.get("response", ""),
                 },
-                {
-                    "uri": "rag://context/current",
-                    "name": "Current Context Window",
-                    "mimeType": "application/json",
-                    "description": "Current context window contents and token allocations"
-                },
-                {
-                    "uri": "rag://agents/capabilities",
-                    "name": "Agent Capabilities",
-                    "mimeType": "application/json",
-                    "description": "Available agent types, specializations, and performance metrics"
-                }
-            ]
+            ],
+            "metadata": {
+                "agents_used": result.get("agents_used", []),
+                "confidence_scores": result.get("confidence_scores", {}),
+                "reasoning_traces": result.get("reasoning_traces", []),
+                "execution_stats": result.get("execution_stats", {}),
+            },
         }
-    
-    async def _handle_list_resource_templates(self, request):
-        """Handle listing available resource templates."""
-        return {
-            "resourceTemplates": [
-                {
-                    "uriTemplate": "rag://stats/{organization_id}",
-                    "name": "Organization Knowledge Base Statistics",
-                    "mimeType": "application/json",
-                    "description": "Statistics about an organization's knowledge base"
-                },
-                {
-                    "uriTemplate": "rag://context/{session_id}",
-                    "name": "Session Context Window",
-                    "mimeType": "application/json",
-                    "description": "Context window contents and token allocations for a specific session"
-                }
-            ]
-        }
-    
-    async def _handle_read_resource(self, request):
-        """Handle reading resources."""
-        uri = request.params.uri
-        
-        # Handle static resources
-        if uri == "rag://stats/global":
-            return await self._handle_global_stats()
-        elif uri == "rag://context/current":
-            return await self._handle_current_context()
-        elif uri == "rag://agents/capabilities":
-            return await self._handle_agent_capabilities()
-        
-        # Handle templated resources
-        if uri.startswith("rag://stats/"):
-            organization_id = uri.replace("rag://stats/", "")
-            return await self._handle_organization_stats(organization_id)
-        elif uri.startswith("rag://context/"):
-            session_id = uri.replace("rag://context/", "")
-            return await self._handle_session_context(session_id)
-        
-        raise McpError(ErrorCode.InvalidRequest, f"Unknown resource URI: {uri}")
-    
-    async def _handle_global_stats(self):
-        """Handle global knowledge base statistics resource."""
-        try:
-            stats = await self.knowledge_store.get_global_stats()
-            
-            return {
-                "contents": [
-                    {
-                        "uri": "rag://stats/global",
-                        "mimeType": "application/json",
-                        "text": str(stats)
-                    }
-                ]
-            }
-        except Exception as e:
-            logger.error(f"Error getting global stats: {str(e)}")
-            raise McpError(ErrorCode.InternalError, f"Error getting global stats: {str(e)}")
-    
-    async def _handle_current_context(self):
-        """Handle current context window resource."""
-        try:
-            context = await self.context_manager.get_current_context()
-            
-            return {
-                "contents": [
-                    {
-                        "uri": "rag://context/current",
-                        "mimeType": "application/json",
-                        "text": str(context)
-                    }
-                ]
-            }
-        except Exception as e:
-            logger.error(f"Error getting current context: {str(e)}")
-            raise McpError(ErrorCode.InternalError, f"Error getting current context: {str(e)}")
-    
-    async def _handle_agent_capabilities(self):
-        """Handle agent capabilities resource."""
-        try:
-            capabilities = await self.agent_orchestrator.get_capabilities()
-            
-            return {
-                "contents": [
-                    {
-                        "uri": "rag://agents/capabilities",
-                        "mimeType": "application/json",
-                        "text": str(capabilities)
-                    }
-                ]
-            }
-        except Exception as e:
-            logger.error(f"Error getting agent capabilities: {str(e)}")
-            raise McpError(ErrorCode.InternalError, f"Error getting agent capabilities: {str(e)}")
-    
-    async def _handle_organization_stats(self, organization_id):
-        """Handle organization knowledge base statistics resource."""
-        try:
-            stats = await self.knowledge_store.get_organization_stats(organization_id)
-            
-            return {
-                "contents": [
-                    {
-                        "uri": f"rag://stats/{organization_id}",
-                        "mimeType": "application/json",
-                        "text": str(stats)
-                    }
-                ]
-            }
-        except Exception as e:
-            logger.error(f"Error getting organization stats: {str(e)}")
-            raise McpError(ErrorCode.InternalError, f"Error getting organization stats: {str(e)}")
-    
-    async def _handle_session_context(self, session_id):
-        """Handle session context window resource."""
-        try:
-            context = await self.context_manager.get_session_context(session_id)
-            
-            return {
-                "contents": [
-                    {
-                        "uri": f"rag://context/{session_id}",
-                        "mimeType": "application/json",
-                        "text": str(context)
-                    }
-                ]
-            }
-        except Exception as e:
-            logger.error(f"Error getting session context: {str(e)}")
-            raise McpError(ErrorCode.InternalError, f"Error getting session context: {str(e)}")
-    
-    async def run(self):
-        """Run the MCP server."""
-        transport = StdioServerTransport()
-        await self.server.connect(transport)
-        logger.info("Agentic RAG MCP server running")
 
-# This would be used when running as a standalone MCP server
-if __name__ == "__main__":
-    import asyncio
+async def main():
+    """Run the MCP server."""
+    from modelcontextprotocol.server import Server
+    from modelcontextprotocol.server.stdio import StdioServerTransport
     
+    # Create the server
     server = AgenticRAGServer()
-    asyncio.run(server.run())
+    
+    # Create the MCP server
+    mcp_server = Server(
+        {
+            "name": "agentic-rag",
+            "version": "0.1.0",
+        },
+        {
+            "capabilities": {
+                "resources": {},
+                "tools": {},
+            },
+        }
+    )
+    
+    # Set up request handlers
+    mcp_server.set_request_handler("list_resources", server.list_resources)
+    mcp_server.set_request_handler("list_resource_templates", server.list_resource_templates)
+    mcp_server.set_request_handler("read_resource", server.read_resource)
+    mcp_server.set_request_handler("list_tools", server.list_tools)
+    mcp_server.set_request_handler("call_tool", server.call_tool)
+    
+    # Set up error handler
+    mcp_server.onerror = lambda error: logger.error(f"MCP error: {error}")
+    
+    # Connect to the transport
+    transport = StdioServerTransport()
+    await mcp_server.connect(transport)
+    
+    logger.info("Agentic RAG MCP server running on stdio")
+    
+    # Keep the server running
+    try:
+        while True:
+            await asyncio.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+    finally:
+        await mcp_server.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())

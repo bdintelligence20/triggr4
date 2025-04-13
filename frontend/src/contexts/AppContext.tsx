@@ -19,6 +19,10 @@ interface AppContextType {
   error: string | null;
   setError: (value: string | null) => void;
   
+  // Enhanced RAG State
+  useEnhancedRAG: boolean;
+  setUseEnhancedRAG: (value: boolean) => void;
+  
   // Knowledge States
   searchQuery: string;
   setSearchQuery: (value: string) => void;
@@ -140,6 +144,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [newMessage, setNewMessage] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [activeEventSource, setActiveEventSource] = useState<EventSource | null>(null);
+  const [useEnhancedRAG, setUseEnhancedRAG] = useState<boolean>(true); // Default to enabled
   
   // WhatsApp States
   const [whatsappNumber, setWhatsappNumber] = useState<string | null>(null);
@@ -269,6 +274,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setChatMessages,
     activeEventSource,
     setActiveEventSource,
+    useEnhancedRAG,
+    setUseEnhancedRAG,
     
     // WhatsApp States
     whatsappNumber,

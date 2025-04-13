@@ -209,19 +209,13 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const loadChatHistory = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(`${API_URL}/chat/history`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-        }
-      });
+      const response = await api.getChatHistory();
       
-      if (!response.ok) {
-        throw new Error('Failed to load chat history');
+      if (response.error) {
+        throw new Error(response.error);
       }
       
-      const data = await response.json();
-      setChatHistory(data.sessions || []);
+      setChatHistory(response.data?.sessions || []);
     } catch (error) {
       console.error('Failed to load chat history:', error);
     } finally {
@@ -233,18 +227,13 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const loadChatSession = async (sessionId: string) => {
     try {
       setIsLoading(true);
-      const response = await fetch(`${API_URL}/chat/session/${sessionId}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-        }
-      });
+      const response = await api.getChatSession(sessionId);
       
-      if (!response.ok) {
-        throw new Error('Failed to load chat session');
+      if (response.error) {
+        throw new Error(response.error);
       }
       
-      const session = await response.json();
+      const session = response.data;
       
       // Convert session messages to app format
       const sessionMessages = session.messages.map((msg: any) => ({
@@ -331,30 +320,23 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const sessionTitle = title || (activeThread ? activeThread.title : 
         chatMessages.length > 0 ? `Chat about ${chatMessages[0].content.substring(0, 30)}...` : 'Chat Session');
       
-      const response = await fetch(`${API_URL}/chat/save`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-        },
-        body: JSON.stringify({
-          session_id: activeThread?.id !== 'default' ? activeThread?.id : undefined,
-          title: sessionTitle,
-          messages,
-          category: chatCategory
-        })
+      const response = await api.saveChatSession({
+        session_id: activeThread?.id !== 'default' ? activeThread?.id : undefined,
+        title: sessionTitle,
+        messages,
+        category: chatCategory
       });
       
-      if (!response.ok) {
-        throw new Error('Failed to save chat session');
+      if (response.error) {
+        throw new Error(response.error);
       }
       
-      const data = await response.json();
+      const sessionData = response.data || { session_id: '' };
       
       // Update active thread with new ID if it was a new session
       if (!activeThread || activeThread.id === 'default') {
         const newThread: ChatThread = {
-          id: data.session_id,
+          id: sessionData.session_id,
           title: sessionTitle,
           lastMessage: messages[messages.length - 1].content,
           timestamp: new Date().toISOString(),
@@ -369,7 +351,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Refresh chat history
       loadChatHistory();
       
-      return data.session_id;
+      return sessionData.session_id;
     } catch (error) {
       console.error('Failed to save chat session:', error);
       return '';

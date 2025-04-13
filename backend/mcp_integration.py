@@ -1,360 +1,307 @@
 """
-MCP Server Integration
+MCP Integration
 
-This module provides utilities for integrating the MCP server with the existing Flask application.
+This module provides integration with the MCP server for enhanced RAG capabilities.
+It serves as a bridge between the Flask application and the MCP server.
 """
 
 import os
 import logging
 import asyncio
-from typing import Dict, Any, List, Optional
+from typing import Dict, List, Any, Optional, Union
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Import MCP server components
+from mcp_server.context_manager import ContextManager
+from mcp_server.knowledge_store import VectorizedStore
+from mcp_server.relevance_engine import RelevanceEngine
+from mcp_server.agent_orchestration import AgentOrchestrator
+
+# Environment variables
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
+PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "knowledge-hub-vectors")
+
+# Validate required environment variables
+if not OPENAI_API_KEY or not ANTHROPIC_API_KEY or not PINECONE_API_KEY:
+    missing = []
+    if not OPENAI_API_KEY:
+        missing.append("OPENAI_API_KEY")
+    if not ANTHROPIC_API_KEY:
+        missing.append("ANTHROPIC_API_KEY")
+    if not PINECONE_API_KEY:
+        missing.append("PINECONE_API_KEY")
+    logger.error(f"Missing required environment variables: {', '.join(missing)}")
+    raise EnvironmentError(f"Missing required environment variables: {', '.join(missing)}")
 
 class MCPIntegration:
     """
-    Integration utilities for the MCP server.
+    MCP Integration
     
-    This class provides methods for interacting with the MCP server from the Flask application.
+    This class provides integration with the MCP server for enhanced RAG capabilities.
+    It serves as a bridge between the Flask application and the MCP server.
     """
     
-    def __init__(self, server_name: str = "agentic-rag"):
-        """
-        Initialize the MCP integration.
+    def __init__(self):
+        """Initialize the MCP integration."""
+        # Initialize components
+        self.context_manager = ContextManager()
+        self.vectorized_store = VectorizedStore(
+            pinecone_api_key=PINECONE_API_KEY,
+            pinecone_index_name=PINECONE_INDEX_NAME,
+            openai_api_key=OPENAI_API_KEY
+        )
+        self.relevance_engine = RelevanceEngine()
+        self.agent_orchestrator = AgentOrchestrator(
+            anthropic_api_key=ANTHROPIC_API_KEY,
+            openai_api_key=OPENAI_API_KEY
+        )
         
-        Args:
-            server_name: Name of the MCP server in the configuration
-        """
-        self.server_name = server_name
-        logger.info(f"Initialized MCP integration for server: {server_name}")
+        logger.info("MCP integration initialized")
     
     async def query_knowledge_base(
-        self, 
-        query: str, 
-        conversation_history: str = "", 
-        context_preferences: Dict[str, Any] = None
+        self,
+        query: str,
+        conversation_history: str = "",
+        context_preferences: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Query the knowledge base using the MCP server.
+        Query the knowledge base with enhanced context management.
         
         Args:
-            query: The user's query
-            conversation_history: Previous conversation history
-            context_preferences: Preferences for context management
-        
+            query: The query string
+            conversation_history: The conversation history
+            context_preferences: Context allocation preferences
+            
         Returns:
-            Query response
+            Dict containing the query result
         """
-        try:
-            # Import the MCP client
-            from modelcontextprotocol.client import Client
-            
-            # Create a client
-            client = Client()
-            
-            # Call the query_knowledge_base tool
-            result = await client.call_tool(
-                self.server_name,
-                "query_knowledge_base",
-                {
-                    "query": query,
-                    "conversation_history": conversation_history,
-                    "context_preferences": context_preferences or {}
+        if not query:
+            raise ValueError("Query is required")
+        
+        # Set default context preferences if not provided
+        if context_preferences is None:
+            context_preferences = {
+                "allocation": {
+                    "global": 0.3,
+                    "task": 0.4,
+                    "conversation": 0.3
                 }
-            )
-            
-            # Extract the response
-            response = {
-                "answer": result["content"][0]["text"] if result.get("content") else "",
-                "sources": result.get("metadata", {}).get("sources", []),
-                "reasoning_trace": result.get("metadata", {}).get("reasoning_trace", []),
-                "context_usage": result.get("metadata", {}).get("context_usage", {})
             }
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"Error querying knowledge base via MCP: {str(e)}")
-            return {
-                "answer": f"Error querying knowledge base: {str(e)}",
-                "sources": [],
-                "error": str(e)
-            }
+        
+        # Get relevant documents from vector store
+        documents = await self.vectorized_store.search(query)
+        
+        # Apply relevance engine to rerank documents
+        reranked_documents = await self.relevance_engine.rerank(query, documents, conversation_history)
+        
+        # Optimize context window
+        context = await self.context_manager.optimize_context(
+            query,
+            "\n\n".join([doc.get("text", "") for doc in reranked_documents]),
+            conversation_history,
+            context_preferences
+        )
+        
+        # Generate response using the orchestrator
+        response = await self.agent_orchestrator.generate_response(
+            query,
+            context.get("operation_result", {}).get("context", ""),
+            conversation_history
+        )
+        
+        return response
     
     async def process_document(
-        self, 
-        document_content: str, 
-        metadata: Dict[str, Any] = None, 
-        processing_preferences: Dict[str, Any] = None
+        self,
+        document_content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        processing_preferences: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Process a document using the MCP server.
+        Process a document with enhanced semantic chunking.
         
         Args:
-            document_content: The document content to process
+            document_content: The document content
             metadata: Document metadata
-            processing_preferences: Preferences for document processing
-        
+            processing_preferences: Processing preferences
+            
         Returns:
-            Processing results
+            Dict containing the processing result
         """
-        try:
-            # Import the MCP client
-            from modelcontextprotocol.client import Client
-            
-            # Create a client
-            client = Client()
-            
-            # Call the process_document tool
-            result = await client.call_tool(
-                self.server_name,
-                "process_document",
-                {
-                    "document_content": document_content,
-                    "metadata": metadata or {},
-                    "processing_preferences": processing_preferences or {}
-                }
-            )
-            
-            # Extract the response
-            response = {
-                "message": result["content"][0]["text"] if result.get("content") else "",
-                "document_id": result.get("metadata", {}).get("document_id", ""),
-                "vectors_stored": result.get("metadata", {}).get("vectors_stored", 0),
-                "summary": result.get("metadata", {}).get("summary", ""),
-                "processing_stats": result.get("metadata", {}).get("processing_stats", {})
-            }
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"Error processing document via MCP: {str(e)}")
-            return {
-                "message": f"Error processing document: {str(e)}",
-                "error": str(e)
-            }
+        if not document_content:
+            raise ValueError("Document content is required")
+        
+        # Process document with semantic chunking
+        result = await self.vectorized_store.process_document(
+            document_content,
+            metadata,
+            processing_preferences
+        )
+        
+        return result
     
     async def manage_context(
-        self, 
-        operation: str, 
-        context_data: Dict[str, Any] = None
+        self,
+        operation: str,
+        context_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Manage the context window using the MCP server.
+        Manage the context window for RAG operations.
         
         Args:
-            operation: The operation to perform (add, remove, prioritize, clear)
-            context_data: Data for the operation
-        
+            operation: The operation to perform (add, remove, optimize, clear)
+            context_data: Context data
+            
         Returns:
-            Operation result
+            Dict containing the operation result
         """
-        try:
-            # Import the MCP client
-            from modelcontextprotocol.client import Client
-            
-            # Create a client
-            client = Client()
-            
-            # Call the manage_context tool
-            result = await client.call_tool(
-                self.server_name,
-                "manage_context",
-                {
-                    "operation": operation,
-                    "context_data": context_data or {}
-                }
-            )
-            
-            # Extract the response
-            response = {
-                "message": result["content"][0]["text"] if result.get("content") else "",
-                "context_size": result.get("metadata", {}).get("context_size", 0),
-                "token_usage": result.get("metadata", {}).get("token_usage", 0),
-                "operation_result": result.get("metadata", {}).get("operation_result", {})
-            }
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"Error managing context via MCP: {str(e)}")
-            return {
-                "message": f"Error managing context: {str(e)}",
-                "error": str(e)
-            }
+        if not operation:
+            raise ValueError("Operation is required")
+        
+        # Set default context data if not provided
+        if context_data is None:
+            context_data = {}
+        
+        # Perform context operation
+        result = await self.context_manager.perform_operation(operation, context_data)
+        
+        return {
+            "message": f"Context operation '{operation}' completed successfully",
+            "context_size": result.get("context_size", {}),
+            "token_usage": result.get("token_usage", {}),
+            "operation_result": result.get("operation_result", {})
+        }
     
     async def orchestrate_agents(
-        self, 
-        task: str, 
-        agent_preferences: Dict[str, Any] = None, 
-        execution_parameters: Dict[str, Any] = None
+        self,
+        task: str,
+        agent_preferences: Optional[Dict[str, List[str]]] = None,
+        execution_parameters: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Orchestrate multiple agents using the MCP server.
+        Orchestrate multiple specialized agents for complex tasks.
         
         Args:
-            task: Task description
-            agent_preferences: Agent selection preferences
-            execution_parameters: Parameters for execution
-        
+            task: The task to perform
+            agent_preferences: Preferences for which agents to include/exclude
+            execution_parameters: Parameters for agent execution
+            
         Returns:
-            Task execution result
+            Dict containing the orchestration result
         """
-        try:
-            # Import the MCP client
-            from modelcontextprotocol.client import Client
-            
-            # Create a client
-            client = Client()
-            
-            # Call the orchestrate_agents tool
-            result = await client.call_tool(
-                self.server_name,
-                "orchestrate_agents",
-                {
-                    "task": task,
-                    "agent_preferences": agent_preferences or {},
-                    "execution_parameters": execution_parameters or {}
-                }
-            )
-            
-            # Extract the response
-            response = {
-                "response": result["content"][0]["text"] if result.get("content") else "",
-                "agents_used": result.get("metadata", {}).get("agents_used", []),
-                "confidence_scores": result.get("metadata", {}).get("confidence_scores", {}),
-                "reasoning_traces": result.get("metadata", {}).get("reasoning_traces", []),
-                "execution_stats": result.get("metadata", {}).get("execution_stats", {})
-            }
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"Error orchestrating agents via MCP: {str(e)}")
-            return {
-                "response": f"Error orchestrating agents: {str(e)}",
-                "error": str(e)
-            }
-    
-    async def get_agent_capabilities(self) -> Dict[str, Any]:
-        """
-        Get agent capabilities from the MCP server.
+        if not task:
+            raise ValueError("Task is required")
         
-        Returns:
-            Agent capabilities
-        """
-        try:
-            # Import the MCP client
-            from modelcontextprotocol.client import Client
-            
-            # Create a client
-            client = Client()
-            
-            # Access the agent_capabilities resource
-            result = await client.read_resource(
-                self.server_name,
-                "rag://agents/capabilities"
-            )
-            
-            # Extract the response
-            if result and result.get("contents"):
-                capabilities = result["contents"][0]["text"]
-                return {
-                    "capabilities": capabilities,
-                    "status": "success"
-                }
-            else:
-                return {
-                    "capabilities": {},
-                    "status": "error",
-                    "message": "No capabilities returned"
-                }
-            
-        except Exception as e:
-            logger.error(f"Error getting agent capabilities via MCP: {str(e)}")
-            return {
-                "capabilities": {},
-                "status": "error",
-                "message": str(e)
-            }
+        # Orchestrate agents
+        result = await self.agent_orchestrator.orchestrate(
+            task,
+            agent_preferences,
+            execution_parameters
+        )
+        
+        return result
 
-# Example usage in a Flask route
-"""
-from flask import Blueprint, request, jsonify
-import asyncio
-from mcp_integration import MCPIntegration
+async def process_document_with_enhanced_chunking(
+    document_content: str,
+    metadata: Optional[Dict[str, Any]] = None,
+    processing_preferences: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Process a document with enhanced semantic chunking.
+    
+    Args:
+        document_content: The document content
+        metadata: Document metadata
+        processing_preferences: Processing preferences
+        
+    Returns:
+        Dict containing the processing result
+    """
+    if not document_content:
+        raise ValueError("Document content is required")
+    
+    # Initialize MCP integration
+    mcp = MCPIntegration()
+    
+    # Process document with semantic chunking
+    result = await mcp.process_document(
+        document_content,
+        metadata,
+        processing_preferences
+    )
+    
+    return result
 
-mcp_bp = Blueprint('mcp', __name__)
-mcp_integration = MCPIntegration()
-
-@mcp_bp.route('/mcp/query', methods=['POST'])
-def mcp_query():
-    data = request.get_json()
-    query = data.get('query')
-    history = data.get('history', '')
-    preferences = data.get('preferences', {})
+async def enhance_rag_response(
+    query: str,
+    existing_response: Dict[str, Any],
+    conversation_history: str = ""
+) -> Dict[str, Any]:
+    """
+    Enhance an existing RAG response.
     
-    # Call the MCP server
-    result = asyncio.run(mcp_integration.query_knowledge_base(
-        query=query,
-        conversation_history=history,
-        context_preferences=preferences
-    ))
+    Args:
+        query: The query string
+        existing_response: The existing response
+        conversation_history: The conversation history
+        
+    Returns:
+        Dict containing the enhanced response
+    """
+    if not query or not existing_response:
+        raise ValueError("Query and existing response are required")
     
-    return jsonify(result)
-
-@mcp_bp.route('/mcp/process', methods=['POST'])
-def mcp_process_document():
-    data = request.get_json()
-    content = data.get('content')
-    metadata = data.get('metadata', {})
-    preferences = data.get('preferences', {})
+    # Initialize MCP integration
+    mcp = MCPIntegration()
     
-    # Call the MCP server
-    result = asyncio.run(mcp_integration.process_document(
-        document_content=content,
-        metadata=metadata,
-        processing_preferences=preferences
-    ))
+    # Extract existing answer and sources
+    existing_answer = existing_response.get("answer", "")
+    existing_sources = existing_response.get("sources", [])
     
-    return jsonify(result)
-
-@mcp_bp.route('/mcp/context', methods=['POST'])
-def mcp_manage_context():
-    data = request.get_json()
-    operation = data.get('operation')
-    context_data = data.get('context_data', {})
+    # Prepare task for agent orchestration
+    task = f"""
+    Enhance the following RAG response:
     
-    # Call the MCP server
-    result = asyncio.run(mcp_integration.manage_context(
-        operation=operation,
-        context_data=context_data
-    ))
+    Query: {query}
     
-    return jsonify(result)
-
-@mcp_bp.route('/mcp/orchestrate', methods=['POST'])
-def mcp_orchestrate_agents():
-    data = request.get_json()
-    task = data.get('task')
-    agent_preferences = data.get('agent_preferences', {})
-    execution_parameters = data.get('execution_parameters', {})
+    Existing Answer: {existing_answer}
     
-    # Call the MCP server
-    result = asyncio.run(mcp_integration.orchestrate_agents(
+    Existing Sources: {existing_sources}
+    
+    Conversation History: {conversation_history}
+    
+    Please provide a more comprehensive and accurate response.
+    """
+    
+    # Orchestrate agents
+    result = await mcp.orchestrate_agents(
         task=task,
-        agent_preferences=agent_preferences,
-        execution_parameters=execution_parameters
-    ))
+        agent_preferences={
+            "include": ["reasoner", "generator"],
+            "exclude": ["retriever"]
+        },
+        execution_parameters={
+            "max_tokens": 1000,
+            "temperature": 0.7
+        }
+    )
     
-    return jsonify(result)
-
-@mcp_bp.route('/mcp/capabilities', methods=['GET'])
-def mcp_get_capabilities():
-    # Call the MCP server
-    result = asyncio.run(mcp_integration.get_agent_capabilities())
+    # Extract enhanced response
+    enhanced_answer = result.get("response", existing_answer)
     
-    return jsonify(result)
-"""
+    # Return enhanced response
+    return {
+        "answer": enhanced_answer,
+        "sources": existing_sources,
+        "reasoning_trace": result.get("reasoning_traces", []),
+        "context_usage": {
+            "context_length": len(existing_answer) + len(conversation_history),
+            "history_length": len(conversation_history)
+        },
+        "confidence": sum(result.get("confidence_scores", {}).values()) / len(result.get("confidence_scores", {})) if result.get("confidence_scores") else 0.5,
+        "enhanced": True
+    }

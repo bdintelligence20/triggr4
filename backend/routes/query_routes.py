@@ -98,6 +98,32 @@ def query():
                 history=conversation_history
             )
             
+            # Check if enhancement is requested or enabled by default
+            if data.get("enhance", True):
+                from mcp_integration import enhance_rag_response
+                import asyncio
+                
+                try:
+                    enhanced_result = asyncio.run(enhance_rag_response(
+                        query=query_text,
+                        existing_response=result,
+                        conversation_history=conversation_history
+                    ))
+                    
+                    return jsonify({
+                        "response": enhanced_result["answer"],
+                        "sources": enhanced_result["sources"],
+                        "reasoning_trace": enhanced_result.get("reasoning_trace", []),
+                        "context_usage": enhanced_result.get("context_usage", {}),
+                        "enhanced": True,
+                        "streaming": False,
+                        "status": "completed"
+                    })
+                except Exception as e:
+                    logger.warning(f"Enhanced RAG failed, falling back to standard RAG: {str(e)}")
+                    # Fall back to standard response if enhancement fails
+            
+            # Standard response (if enhancement is disabled or failed)
             return jsonify({
                 "response": result["answer"],
                 "sources": result["sources"],

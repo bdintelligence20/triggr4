@@ -28,7 +28,8 @@ export const useChat = () => {
     chatMessages,
     setChatMessages,
     activeEventSource,
-    setActiveEventSource
+    setActiveEventSource,
+    useEnhancedRAG
   } = useAppContext();
   
   // Get user and organization info from auth context
@@ -113,7 +114,8 @@ export const useChat = () => {
         body: JSON.stringify({
           query: newMessage,
           stream: true,
-          history: conversationHistory
+          history: conversationHistory,
+          enhance: useEnhancedRAG
         }),
       });
       

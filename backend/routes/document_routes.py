@@ -126,21 +126,71 @@ def upload_document():
             # Extract text and metadata first
             text, metadata, _ = DocumentLoaderFactory.extract_text_and_metadata(local_path)
             
-            # Process document with properly extracted text
-            vectors_stored = rag_system.process_document(
-                doc_text=text,
-                source_id=item_id,
-                namespace=None  # Will use organization-based namespace
-            )
-            
-            # Update document with content and metadata
-            doc_ref.update({
-                "content": text,
-                "word_count": len(text.split()),
-                "processing_status": "completed",
-                "vectors_stored": vectors_stored,
-                "metadata": metadata
-            })
+            # Try enhanced processing with MCP server first
+            try:
+                from mcp_integration import process_document_with_enhanced_chunking
+                import asyncio
+                
+                logger.info(f"Processing document {item_id} with enhanced chunking")
+                
+                # Process with enhanced chunking
+                enhanced_result = asyncio.run(process_document_with_enhanced_chunking(
+                    document_content=text,
+                    metadata={
+                        "title": title,
+                        "organization_id": organization_id,
+                        "category": category,
+                        "document_id": item_id
+                    },
+                    processing_preferences={
+                        "max_chunk_size": 1000,
+                        "overlap": 200
+                    }
+                ))
+                
+                # Check if enhanced processing was successful
+                if enhanced_result.get("vectors_stored", 0) > 0:
+                    vectors_stored = enhanced_result.get("vectors_stored", 0)
+                    summary = enhanced_result.get("summary", "")
+                    processing_stats = enhanced_result.get("processing_stats", {})
+                    
+                    logger.info(f"Enhanced processing successful: {vectors_stored} vectors stored")
+                    
+                    # Update document with enhanced processing results
+                    doc_ref.update({
+                        "content": text,
+                        "summary": summary,
+                        "word_count": len(text.split()),
+                        "processing_status": "completed",
+                        "vectors_stored": vectors_stored,
+                        "metadata": metadata,
+                        "processing_stats": processing_stats,
+                        "enhanced_processing": True
+                    })
+                else:
+                    # Fall back to standard processing
+                    logger.warning(f"Enhanced processing failed, falling back to standard processing")
+                    raise Exception("Enhanced processing did not store any vectors")
+            except Exception as e:
+                # Fall back to standard processing
+                logger.warning(f"Enhanced processing failed, falling back to standard processing: {str(e)}")
+                
+                # Process document with standard RAG system
+                vectors_stored = rag_system.process_document(
+                    doc_text=text,
+                    source_id=item_id,
+                    namespace=None  # Will use organization-based namespace
+                )
+                
+                # Update document with content and metadata
+                doc_ref.update({
+                    "content": text,
+                    "word_count": len(text.split()),
+                    "processing_status": "completed",
+                    "vectors_stored": vectors_stored,
+                    "metadata": metadata,
+                    "enhanced_processing": False
+                })
             
             logger.info(f"Successfully processed document {item_id}: {vectors_stored} vectors stored")
             

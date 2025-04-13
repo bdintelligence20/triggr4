@@ -2,259 +2,400 @@
 MCP Routes
 
 This module provides Flask routes for interacting with the MCP server.
+It exposes the enhanced RAG capabilities to the frontend.
 """
 
 import os
 import logging
+import json
+from flask import Blueprint, request, jsonify
+from firebase_admin import firestore
 import asyncio
-from flask import Blueprint, request, jsonify, current_app
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from utils import get_user_organization_id, get_user_id
 
 # Import MCP integration
-from mcp_integration import MCPIntegration
+from mcp_integration import (
+    MCPIntegration,
+    enhance_rag_response,
+    process_document_with_enhanced_chunking
+)
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Create blueprint
 mcp_bp = Blueprint('mcp', __name__)
 
-# Initialize MCP integration
-mcp_integration = MCPIntegration()
+# Get database instance
+db = firestore.client()
 
-# Define a custom key function for organization-aware rate limiting
-def get_tenant_limit_key():
-    # Get organization ID from the authenticated user
-    organization_id = get_user_organization_id()
-    # Fallback to IP address if organization ID is not available
-    if not organization_id:
-        return get_remote_address()
-    # Combine organization ID with IP for more granular control
-    return f"{organization_id}:{request.remote_addr}"
-
-# Initialize limiter for this blueprint with organization-aware key function
-limiter = Limiter(
-    key_func=get_tenant_limit_key,
-    default_limits=["150 per day", "30 per hour"],
-    storage_uri="memory://"
-)
-
-@mcp_bp.route('/mcp/query', methods=['POST'])
-@limiter.limit("10 per minute")  # Stricter limit for the query endpoint
-def mcp_query():
-    """Query the knowledge base using the MCP server."""
-    data = request.get_json()
-    query_text = data.get("query")
-    conversation_history = data.get("history", "")
-    context_preferences = data.get("preferences", {})
+@mcp_bp.route('/query', methods=['POST'])
+def query_knowledge_base():
+    """
+    Query the knowledge base with enhanced context management.
     
-    # Get organization ID from authenticated user
-    organization_id = get_user_organization_id()
+    Request body:
+    {
+        "query": "Query string",
+        "conversation_history": "Previous conversation history",
+        "context_preferences": {
+            "allocation": {
+                "global": 0.3,
+                "task": 0.4,
+                "conversation": 0.3
+            }
+        },
+        "organization_id": "Organization ID"
+    }
     
-    # Enforce organization ID requirement for multi-tenant isolation
-    if not organization_id:
-        logger.error("Organization ID is required for querying")
-        return jsonify({"error": "Organization ID is required. Please ensure you are properly authenticated and assigned to an organization."}), 403
-    
-    logger.info(f"MCP query received: '{query_text}', organization: {organization_id}")
-    
-    if not query_text or not isinstance(query_text, str) or len(query_text.strip()) < 2:
-        return jsonify({"error": "Invalid or empty query"}), 400
-
+    Returns:
+        JSON response with the query result
+    """
     try:
-        # Log query to Firestore
-        from firebase_admin import firestore
-        db = firestore.client()
-        db.collection("queries").add({
-            "query": query_text,
-            "timestamp": firestore.SERVER_TIMESTAMP,
-            "client_ip": request.remote_addr,
-            "history": conversation_history,
-            "organizationId": organization_id,
-            "source": "mcp"
-        })
+        # Get request data
+        data = request.json
         
-        # Add organization ID to context preferences
-        if 'context_preferences' not in context_preferences:
-            context_preferences['context_preferences'] = {}
-        context_preferences['context_preferences']['organization_id'] = organization_id
+        # Validate required fields
+        if not data or not data.get('query'):
+            return jsonify({'error': 'Query is required'}), 400
         
-        # Call the MCP server
-        result = asyncio.run(mcp_integration.query_knowledge_base(
-            query=query_text,
-            conversation_history=conversation_history,
-            context_preferences=context_preferences
-        ))
+        # Get parameters
+        query = data.get('query')
+        conversation_history = data.get('conversation_history', '')
+        context_preferences = data.get('context_preferences', {})
+        organization_id = data.get('organization_id')
         
+        # Validate organization ID
+        if not organization_id:
+            return jsonify({'error': 'Organization ID is required'}), 400
+        
+        # Initialize MCP integration
+        mcp = MCPIntegration()
+        
+        # Run query asynchronously
+        async def run_query():
+            try:
+                result = await mcp.query_knowledge_base(
+                    query=query,
+                    conversation_history=conversation_history,
+                    context_preferences=context_preferences
+                )
+                return result
+            except Exception as e:
+                logger.error(f"Error querying knowledge base: {str(e)}")
+                raise
+        
+        # Run the query
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(run_query())
+        loop.close()
+        
+        # Store the query in Firestore
+        query_id = db.collection('queries').document().id
+        query_data = {
+            'query': query,
+            'response': result.get('answer', ''),
+            'sources': result.get('sources', []),
+            'reasoning_trace': result.get('reasoning_trace', []),
+            'context_usage': result.get('context_usage', {}),
+            'confidence': result.get('confidence', 0.0),
+            'enhanced': True,
+            'organizationId': organization_id,
+            'createdAt': firestore.SERVER_TIMESTAMP,
+            'status': 'completed'
+        }
+        
+        db.collection('queries').document(query_id).set(query_data)
+        
+        # Return the result
         return jsonify({
-            "response": result["answer"],
-            "sources": result["sources"],
-            "reasoning_trace": result.get("reasoning_trace", []),
-            "context_usage": result.get("context_usage", {}),
-            "status": "completed"
+            'id': query_id,
+            'answer': result.get('answer', ''),
+            'sources': result.get('sources', []),
+            'reasoning_trace': result.get('reasoning_trace', []),
+            'context_usage': result.get('context_usage', {}),
+            'confidence': result.get('confidence', 0.0)
         })
-    
     except Exception as e:
-        logger.error(f"MCP query error: {str(e)}")
-        return jsonify({"error": f"Failed to process query: {str(e)}", "status": "error"}), 500
+        logger.error(f"Error in query_knowledge_base: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
-@mcp_bp.route('/mcp/process', methods=['POST'])
-@limiter.limit("5 per minute")  # Stricter limit for document processing
-def mcp_process_document():
-    """Process a document using the MCP server."""
-    data = request.get_json()
-    document_content = data.get("content")
-    metadata = data.get("metadata", {})
-    processing_preferences = data.get("preferences", {})
+@mcp_bp.route('/process-document', methods=['POST'])
+def process_document():
+    """
+    Process a document with enhanced semantic chunking.
     
-    # Get organization ID from authenticated user
-    organization_id = get_user_organization_id()
+    Request body:
+    {
+        "document_content": "Document content",
+        "metadata": {
+            "title": "Document title",
+            "organization_id": "Organization ID"
+        },
+        "processing_preferences": {
+            "max_chunk_size": 1000,
+            "overlap": 200
+        }
+    }
     
-    # Enforce organization ID requirement for multi-tenant isolation
-    if not organization_id:
-        logger.error("Organization ID is required for document processing")
-        return jsonify({"error": "Organization ID is required. Please ensure you are properly authenticated and assigned to an organization."}), 403
-    
-    logger.info(f"MCP document processing request received, organization: {organization_id}")
-    
-    if not document_content or not isinstance(document_content, str) or len(document_content.strip()) < 10:
-        return jsonify({"error": "Invalid or empty document content"}), 400
-
+    Returns:
+        JSON response with the processing result
+    """
     try:
-        # Add organization ID to metadata
-        if not metadata:
-            metadata = {}
-        metadata['organization_id'] = organization_id
+        # Get request data
+        data = request.json
         
-        # Call the MCP server
-        result = asyncio.run(mcp_integration.process_document(
-            document_content=document_content,
-            metadata=metadata,
-            processing_preferences=processing_preferences
-        ))
+        # Validate required fields
+        if not data or not data.get('document_content'):
+            return jsonify({'error': 'Document content is required'}), 400
         
+        # Get parameters
+        document_content = data.get('document_content')
+        metadata = data.get('metadata', {})
+        processing_preferences = data.get('processing_preferences', {})
+        
+        # Validate organization ID
+        organization_id = metadata.get('organization_id')
+        if not organization_id:
+            return jsonify({'error': 'Organization ID is required in metadata'}), 400
+        
+        # Run document processing asynchronously
+        async def run_processing():
+            try:
+                result = await process_document_with_enhanced_chunking(
+                    document_content=document_content,
+                    metadata=metadata,
+                    processing_preferences=processing_preferences
+                )
+                return result
+            except Exception as e:
+                logger.error(f"Error processing document: {str(e)}")
+                raise
+        
+        # Run the processing
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(run_processing())
+        loop.close()
+        
+        # Store the document in Firestore
+        document_id = result.get('document_id', '')
+        document_data = {
+            'content': document_content,
+            'metadata': metadata,
+            'summary': result.get('summary', ''),
+            'vectors_stored': result.get('vectors_stored', 0),
+            'processing_stats': result.get('processing_stats', {}),
+            'organizationId': organization_id,
+            'createdAt': firestore.SERVER_TIMESTAMP,
+            'status': 'processed',
+            'enhanced': True
+        }
+        
+        db.collection('documents').document(document_id).set(document_data)
+        
+        # Return the result
         return jsonify({
-            "message": result["message"],
-            "document_id": result["document_id"],
-            "vectors_stored": result["vectors_stored"],
-            "summary": result["summary"],
-            "processing_stats": result["processing_stats"],
-            "status": "completed"
+            'document_id': document_id,
+            'vectors_stored': result.get('vectors_stored', 0),
+            'summary': result.get('summary', ''),
+            'processing_stats': result.get('processing_stats', {})
         })
-    
     except Exception as e:
-        logger.error(f"MCP document processing error: {str(e)}")
-        return jsonify({"error": f"Failed to process document: {str(e)}", "status": "error"}), 500
+        logger.error(f"Error in process_document: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
-@mcp_bp.route('/mcp/context', methods=['POST'])
-@limiter.limit("20 per minute")
-def mcp_manage_context():
-    """Manage the context window using the MCP server."""
-    data = request.get_json()
-    operation = data.get("operation")
-    context_data = data.get("context_data", {})
+@mcp_bp.route('/manage-context', methods=['POST'])
+def manage_context():
+    """
+    Manage the context window for RAG operations.
     
-    # Get organization ID from authenticated user
-    organization_id = get_user_organization_id()
+    Request body:
+    {
+        "operation": "add|remove|optimize|clear",
+        "context_data": {
+            "context_id": "Context ID",
+            "content": "Content to add",
+            "query": "Query for optimization",
+            "current_context": "Current context for optimization",
+            "history": "Conversation history for optimization"
+        }
+    }
     
-    # Enforce organization ID requirement for multi-tenant isolation
-    if not organization_id:
-        logger.error("Organization ID is required for context management")
-        return jsonify({"error": "Organization ID is required. Please ensure you are properly authenticated and assigned to an organization."}), 403
-    
-    logger.info(f"MCP context management request received: {operation}, organization: {organization_id}")
-    
-    if not operation or not isinstance(operation, str):
-        return jsonify({"error": "Invalid or empty operation"}), 400
-
+    Returns:
+        JSON response with the operation result
+    """
     try:
-        # Add organization ID to context data
-        if not context_data:
-            context_data = {}
-        context_data['organization_id'] = organization_id
+        # Get request data
+        data = request.json
         
-        # Call the MCP server
-        result = asyncio.run(mcp_integration.manage_context(
-            operation=operation,
-            context_data=context_data
-        ))
+        # Validate required fields
+        if not data or not data.get('operation'):
+            return jsonify({'error': 'Operation is required'}), 400
         
+        # Get parameters
+        operation = data.get('operation')
+        context_data = data.get('context_data', {})
+        
+        # Initialize MCP integration
+        mcp = MCPIntegration()
+        
+        # Run context management asynchronously
+        async def run_context_management():
+            try:
+                result = await mcp.manage_context(
+                    operation=operation,
+                    context_data=context_data
+                )
+                return result
+            except Exception as e:
+                logger.error(f"Error managing context: {str(e)}")
+                raise
+        
+        # Run the context management
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(run_context_management())
+        loop.close()
+        
+        # Return the result
         return jsonify({
-            "message": result["message"],
-            "context_size": result["context_size"],
-            "token_usage": result["token_usage"],
-            "operation_result": result["operation_result"],
-            "status": "completed"
+            'message': result.get('message', ''),
+            'context_size': result.get('context_size', {}),
+            'token_usage': result.get('token_usage', {}),
+            'operation_result': result.get('operation_result', {})
         })
-    
     except Exception as e:
-        logger.error(f"MCP context management error: {str(e)}")
-        return jsonify({"error": f"Failed to manage context: {str(e)}", "status": "error"}), 500
+        logger.error(f"Error in manage_context: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
-@mcp_bp.route('/mcp/orchestrate', methods=['POST'])
-@limiter.limit("5 per minute")
-def mcp_orchestrate_agents():
-    """Orchestrate multiple agents using the MCP server."""
-    data = request.get_json()
-    task = data.get("task")
-    agent_preferences = data.get("agent_preferences", {})
-    execution_parameters = data.get("execution_parameters", {})
+@mcp_bp.route('/orchestrate-agents', methods=['POST'])
+def orchestrate_agents():
+    """
+    Orchestrate multiple specialized agents for complex tasks.
     
-    # Get organization ID from authenticated user
-    organization_id = get_user_organization_id()
+    Request body:
+    {
+        "task": "Task to perform",
+        "agent_preferences": {
+            "include": ["retriever", "reasoner", "generator"],
+            "exclude": []
+        },
+        "execution_parameters": {
+            "max_tokens": 1000,
+            "temperature": 0.7
+        }
+    }
     
-    # Enforce organization ID requirement for multi-tenant isolation
-    if not organization_id:
-        logger.error("Organization ID is required for agent orchestration")
-        return jsonify({"error": "Organization ID is required. Please ensure you are properly authenticated and assigned to an organization."}), 403
-    
-    logger.info(f"MCP agent orchestration request received: '{task}', organization: {organization_id}")
-    
-    if not task or not isinstance(task, str) or len(task.strip()) < 5:
-        return jsonify({"error": "Invalid or empty task"}), 400
-
+    Returns:
+        JSON response with the orchestration result
+    """
     try:
-        # Add organization ID to execution parameters
-        if not execution_parameters:
-            execution_parameters = {}
-        execution_parameters['organization_id'] = organization_id
+        # Get request data
+        data = request.json
         
-        # Call the MCP server
-        result = asyncio.run(mcp_integration.orchestrate_agents(
-            task=task,
-            agent_preferences=agent_preferences,
-            execution_parameters=execution_parameters
-        ))
+        # Validate required fields
+        if not data or not data.get('task'):
+            return jsonify({'error': 'Task is required'}), 400
         
+        # Get parameters
+        task = data.get('task')
+        agent_preferences = data.get('agent_preferences', {})
+        execution_parameters = data.get('execution_parameters', {})
+        
+        # Initialize MCP integration
+        mcp = MCPIntegration()
+        
+        # Run agent orchestration asynchronously
+        async def run_orchestration():
+            try:
+                result = await mcp.orchestrate_agents(
+                    task=task,
+                    agent_preferences=agent_preferences,
+                    execution_parameters=execution_parameters
+                )
+                return result
+            except Exception as e:
+                logger.error(f"Error orchestrating agents: {str(e)}")
+                raise
+        
+        # Run the orchestration
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(run_orchestration())
+        loop.close()
+        
+        # Return the result
         return jsonify({
-            "response": result["response"],
-            "agents_used": result["agents_used"],
-            "confidence_scores": result["confidence_scores"],
-            "reasoning_traces": result.get("reasoning_traces", []),
-            "execution_stats": result["execution_stats"],
-            "status": "completed"
+            'response': result.get('response', ''),
+            'agents_used': result.get('agents_used', []),
+            'confidence_scores': result.get('confidence_scores', {}),
+            'reasoning_traces': result.get('reasoning_traces', []),
+            'execution_stats': result.get('execution_stats', {})
         })
-    
     except Exception as e:
-        logger.error(f"MCP agent orchestration error: {str(e)}")
-        return jsonify({"error": f"Failed to orchestrate agents: {str(e)}", "status": "error"}), 500
+        logger.error(f"Error in orchestrate_agents: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
-@mcp_bp.route('/mcp/capabilities', methods=['GET'])
-def mcp_get_capabilities():
-    """Get agent capabilities from the MCP server."""
-    try:
-        # Call the MCP server
-        result = asyncio.run(mcp_integration.get_agent_capabilities())
-        
-        return jsonify({
-            "capabilities": result["capabilities"],
-            "status": result["status"],
-            "message": result.get("message", "")
-        })
+@mcp_bp.route('/enhance-response', methods=['POST'])
+def enhance_response():
+    """
+    Enhance an existing RAG response.
     
+    Request body:
+    {
+        "query": "Query string",
+        "existing_response": {
+            "answer": "Existing answer",
+            "sources": []
+        },
+        "conversation_history": "Previous conversation history"
+    }
+    
+    Returns:
+        JSON response with the enhanced response
+    """
+    try:
+        # Get request data
+        data = request.json
+        
+        # Validate required fields
+        if not data or not data.get('query') or not data.get('existing_response'):
+            return jsonify({'error': 'Query and existing response are required'}), 400
+        
+        # Get parameters
+        query = data.get('query')
+        existing_response = data.get('existing_response', {})
+        conversation_history = data.get('conversation_history', '')
+        
+        # Run enhancement asynchronously
+        async def run_enhancement():
+            try:
+                result = await enhance_rag_response(
+                    query=query,
+                    existing_response=existing_response,
+                    conversation_history=conversation_history
+                )
+                return result
+            except Exception as e:
+                logger.error(f"Error enhancing response: {str(e)}")
+                raise
+        
+        # Run the enhancement
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(run_enhancement())
+        loop.close()
+        
+        # Return the result
+        return jsonify({
+            'answer': result.get('answer', ''),
+            'sources': result.get('sources', []),
+            'reasoning_trace': result.get('reasoning_trace', []),
+            'context_usage': result.get('context_usage', {}),
+            'confidence': result.get('confidence', 0.0),
+            'enhanced': result.get('enhanced', False)
+        })
     except Exception as e:
-        logger.error(f"MCP capabilities error: {str(e)}")
-        return jsonify({"error": f"Failed to get capabilities: {str(e)}", "status": "error"}), 500
+        logger.error(f"Error in enhance_response: {str(e)}")
+        return jsonify({'error': str(e)}), 500

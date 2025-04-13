@@ -105,23 +105,17 @@ export const useFileUpload = () => {
         formData.append('category', selectedCategory === 'all' ? 'hrhub' : selectedCategory);
         formData.append('title', fileName);
         
-        // Send file to backend
+        // Send file to backend using the API service
         console.log(`Uploading file to ${API_URL}/upload`);
-        const token = localStorage.getItem('auth_token');
-        const response = await fetch(`${API_URL}/upload`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`
-          },
-          body: formData,
-        });
+        const response = await import('../services/api').then(api => 
+          api.uploadDocument(file, selectedCategory === 'all' ? 'hrhub' : selectedCategory, fileName)
+        );
         
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || `Server returned ${response.status}`);
+        if (response.error) {
+          throw new Error(response.error);
         }
         
-        const result: UploadResponse = await response.json();
+        const result = response.data || { item_id: Date.now().toString() + i, file_url: undefined };
         console.log('Upload response:', result);
         
         // Determine file type
@@ -135,7 +129,7 @@ export const useFileUpload = () => {
           title: fileName,
           category: selectedCategory === 'all' ? 'general' : selectedCategory,
           createdAt: new Date(),
-          type: fileType,
+          type: fileType as 'pdf' | 'doc' | 'csv' | 'text',
           fileSize: formatFileSize(file.size),
           fileUrl: result.file_url,
           processing_status: 'completed'

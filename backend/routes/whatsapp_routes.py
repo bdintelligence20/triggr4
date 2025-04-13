@@ -744,9 +744,11 @@ def wati_webhook():
             
             db.collection('queries').document(query_id).set(query_data)
             
-            # Query the knowledge base
+            # Query the knowledge base with enhanced RAG capabilities
             import threading
             import queue
+            import asyncio
+            from mcp_integration import enhance_rag_response
 
             # Create a queue to hold the response
             response_queue = queue.Queue()
@@ -781,13 +783,41 @@ def wati_webhook():
             # Define a function to run the query in a separate thread
             def run_query():
                 try:
-                    result = rag.query(
-                        user_query=message_body,  # Use the correct parameter name
+                    # First get the standard RAG response
+                    standard_result = rag.query(
+                        user_query=message_body,
                         user_id=member['id'],
                         history=conversation_history
-                        # Don't pass organization_id again - it's already set during initialization
                     )
-                    response_queue.put(("success", result))
+                    
+                    # Then enhance it with the MCP server
+                    try:
+                        # Use asyncio in a thread-safe way
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        
+                        enhanced_result = loop.run_until_complete(
+                            enhance_rag_response(
+                                query=message_body,
+                                existing_response=standard_result,
+                                conversation_history=conversation_history
+                            )
+                        )
+                        
+                        loop.close()
+                        
+                        # Use the enhanced result if available
+                        if enhanced_result and "answer" in enhanced_result:
+                            logger.info("Using enhanced RAG response")
+                            response_queue.put(("success", enhanced_result))
+                        else:
+                            # Fall back to standard result if enhancement fails
+                            logger.warning("Enhanced RAG failed, using standard response")
+                            response_queue.put(("success", standard_result))
+                    except Exception as enhance_error:
+                        # Log the error but continue with the standard result
+                        logger.warning(f"Error enhancing RAG response: {str(enhance_error)}")
+                        response_queue.put(("success", standard_result))
                 except Exception as e:
                     response_queue.put(("error", str(e)))
             
@@ -815,10 +845,13 @@ def wati_webhook():
             # Sanitize the response for WhatsApp
             sanitized_response = sanitize_ai_response(response.get('answer', ''))
             
-            # Update the query with the response
+            # Update the query with the enhanced response
             db.collection('queries').document(query_id).update({
                 'response': response.get('answer', ''),
                 'sources': response.get('sources', []),
+                'reasoning_trace': response.get('reasoning_trace', []),
+                'context_usage': response.get('context_usage', {}),
+                'enhanced': True,
                 'status': 'completed',
                 'completedAt': firestore.SERVER_TIMESTAMP
             })
