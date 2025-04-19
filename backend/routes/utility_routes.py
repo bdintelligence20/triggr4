@@ -25,6 +25,29 @@ pinecone_client = PineconeClient(api_key=PINECONE_API_KEY, index_name=PINECONE_I
 def health_check():
     """Health check endpoint for monitoring."""
     try:
+        # Simple health check for Cloud Run
+        # We don't want to check external services for the basic health check
+        # as it might cause the container to fail to start if services are temporarily unavailable
+        
+        # Log the health check
+        logger.info("Health check received")
+        
+        # Return a simple healthy response
+        return jsonify({
+            "status": "healthy",
+            "message": "Service is running"
+        })
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e)
+        }), 500
+
+@utility_bp.route('/health/detailed', methods=['GET'])
+def detailed_health_check():
+    """Detailed health check endpoint for monitoring all services."""
+    try:
         # Basic DB check
         db.collection("system_status").document("health").set({"last_check": firestore.SERVER_TIMESTAMP})
         
@@ -41,7 +64,7 @@ def health_check():
             }
         })
     except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
+        logger.error(f"Detailed health check failed: {str(e)}")
         return jsonify({
             "status": "unhealthy",
             "error": str(e)

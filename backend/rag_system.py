@@ -3,11 +3,12 @@ import logging
 import re
 import threading
 import hashlib
-from typing import List, Dict, Any, Callable
+from typing import List, Dict, Any, Callable, Optional
 import anthropic
 import time
 from embedding_utils import EmbeddingService, chunk_text, TOKENIZER
 from pinecone_client import PineconeClient
+from vertex_client import VertexVectorClient
 
 # Import CrossEncoder for re-ranking (install via: pip install sentence-transformers)
 from sentence_transformers import CrossEncoder
@@ -117,34 +118,59 @@ class ResponseCache:
         return hashlib.md5(context.encode()).hexdigest()
 
 class RAGSystem:
-    def __init__(self, openai_api_key=None, anthropic_api_key=None, pinecone_api_key=None, index_name="knowledge-hub-vectors", organization_id=None):
+    def __init__(self, openai_api_key=None, anthropic_api_key=None, pinecone_api_key=None, index_name="knowledge-hub-vectors", organization_id=None, use_vertex=True):
         """Initialize the RAG system with necessary components."""
         self.openai_api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
         self.anthropic_api_key = anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
         self.pinecone_api_key = pinecone_api_key or os.environ.get("PINECONE_API_KEY")
         self.organization_id = organization_id
+        self.use_vertex = use_vertex
+        self.index_name = index_name
         
         # Set timeouts for external API calls
         self.api_timeout = int(os.environ.get("EXTERNAL_API_TIMEOUT", 30))  # Default 30 seconds
         
-        if not all([self.openai_api_key, self.anthropic_api_key, self.pinecone_api_key]):
+        if not all([self.openai_api_key, self.anthropic_api_key]):
             missing = []
             if not self.openai_api_key: missing.append("OpenAI")
             if not self.anthropic_api_key: missing.append("Anthropic")
-            if not self.pinecone_api_key: missing.append("Pinecone")
             raise ValueError(f"Missing API keys: {', '.join(missing)}")
         
         self.embedding_service = EmbeddingService(api_key=self.openai_api_key)
-        self.pinecone_client = PineconeClient(
-            api_key=self.pinecone_api_key, 
-            index_name=index_name,
-            organization_id=organization_id
-        )
+        
+        # Initialize vector store client (Vertex AI or Pinecone)
+        self.vector_client = self._initialize_vector_client()
+        
         self.anthropic_client = anthropic.Client(api_key=self.anthropic_api_key)
         self.rate_limiter = TokenRateLimiter()
         self.response_cache = ResponseCache()
         
         logger.info(f"RAG system initialized successfully for organization: {organization_id or 'global'}")
+    
+    def _initialize_vector_client(self):
+        """Initialize the appropriate vector store client based on configuration."""
+        if self.use_vertex:
+            try:
+                logger.info("Attempting to initialize Vertex AI Vector Search client")
+                return VertexVectorClient(
+                    index_name=self.index_name,
+                    organization_id=self.organization_id
+                )
+            except Exception as e:
+                logger.warning(f"Failed to initialize Vertex AI Vector Search: {str(e)}")
+                logger.info("Falling back to Pinecone")
+                if not self.pinecone_api_key:
+                    self.pinecone_api_key = os.environ.get("PINECONE_API_KEY")
+                    if not self.pinecone_api_key:
+                        raise ValueError("Pinecone API key is required when Vertex AI initialization fails")
+        
+        # Initialize Pinecone client (either as primary or fallback)
+        logger.info("Initializing Pinecone client")
+        return PineconeClient(
+            api_key=self.pinecone_api_key, 
+            index_name=self.index_name,
+            organization_id=self.organization_id
+        )
         
     def process_document(self, doc_text, source_id, namespace=None):
         """Process a document and store it in the vector database."""
@@ -164,9 +190,9 @@ class RAGSystem:
             logger.error(f"Failed to generate embeddings for document: {source_id}")
             return 0
             
-        # Step 3: Store vectors in Pinecone
-        vectors_stored = self.pinecone_client.store_vectors(source_id, chunks, embeddings, namespace)
-        logger.info(f"Stored {vectors_stored} vectors in Pinecone for document: {source_id}")
+        # Step 3: Store vectors in vector store (Vertex AI or Pinecone)
+        vectors_stored = self.vector_client.store_vectors(source_id, chunks, embeddings, namespace)
+        logger.info(f"Stored {vectors_stored} vectors in vector store for document: {source_id}")
         
         return vectors_stored
         
@@ -364,7 +390,7 @@ class RAGSystem:
                         else:
                             effective_namespace = namespace
                             
-                        matched_docs = self.pinecone_client.query_vectors(
+                        matched_docs = self.vector_client.query_vectors(
                             query_embedding, 
                             namespace=effective_namespace,
                             top_k=5
@@ -426,9 +452,9 @@ class RAGSystem:
             effective_namespace = namespace
             logger.info(f"Using provided namespace: {effective_namespace or 'global_knowledge_base'}")
         
-        # Step 2: Query Pinecone with extra candidates
+        # Step 2: Query vector store with extra candidates
         extended_top_k = min(effective_top_k + 3, 10)  # Get a few extra candidates
-        matched_docs = self.pinecone_client.query_vectors(
+        matched_docs = self.vector_client.query_vectors(
             query_embedding, 
             namespace=effective_namespace,
             top_k=extended_top_k,

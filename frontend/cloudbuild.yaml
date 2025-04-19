@@ -1,0 +1,29 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/${PROJECT_ID}/knowledge-hub/frontend:$COMMIT_SHA', '.']
+
+  # Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/${PROJECT_ID}/knowledge-hub/frontend:$COMMIT_SHA']
+
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'knowledge-hub-frontend'
+      - '--image=us-central1-docker.pkg.dev/${PROJECT_ID}/knowledge-hub/frontend:$COMMIT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--memory=1Gi'
+      - '--cpu=1'
+      - '--min-instances=1'
+      - '--max-instances=5'
+      - '--service-account=knowledge-hub-run@${PROJECT_ID}.iam.gserviceaccount.com'
+      - '--set-env-vars=NODE_ENV=production,BACKEND_URL=https://knowledge-hub-backend-url-placeholder.a.run.app'
+
+images:
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/knowledge-hub/frontend:$COMMIT_SHA'

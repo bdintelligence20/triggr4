@@ -1,15 +1,20 @@
 # Gunicorn configuration for Knowledge Hub backend
 
 # Server socket
-bind = "0.0.0.0:10000"
+bind = "0.0.0.0:8080"
 backlog = 2048
 
 # Worker processes
 workers = 2  # Increased from 1 to 2 for better concurrency
 worker_class = 'sync'  # Reverted to 'sync' to avoid gevent monkey patching issues
 worker_connections = 1000
-timeout = 120
+timeout = 300  # Increased to 5 minutes to match Cloud Run timeout
 keepalive = 2
+
+# Get environment variables for configuration
+import os
+workers = int(os.environ.get('GUNICORN_WORKERS', '2'))
+timeout = int(os.environ.get('GUNICORN_TIMEOUT', '300'))
 
 # Memory management
 max_requests = 1000  # Recycle workers after 1000 requests

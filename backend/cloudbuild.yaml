@@ -1,0 +1,54 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/${PROJECT_ID}/knowledge-hub/backend:$COMMIT_SHA', '.']
+
+  # Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/${PROJECT_ID}/knowledge-hub/backend:$COMMIT_SHA']
+
+  # Run the Pinecone to Vertex AI migration (only on first deployment or when triggered)
+  - name: 'python:3.10'
+    id: 'migrate-vectors'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install google-cloud-aiplatform pinecone-client
+        python cloud_migration.py \
+          --pinecone-api-key=$$PINECONE_API_KEY \
+          --project-id=${PROJECT_ID} \
+          --location=us-central1
+    secretEnv: ['PINECONE_API_KEY']
+    # Add this environment variable to skip migration in future deployments
+    # env:
+    #   - 'SKIP_MIGRATION=true'
+
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'knowledge-hub-backend'
+      - '--image=us-central1-docker.pkg.dev/${PROJECT_ID}/knowledge-hub/backend:$COMMIT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--memory=4Gi'
+      - '--cpu=2'
+      - '--min-instances=1'
+      - '--max-instances=10'
+      - '--service-account=knowledge-hub-run@${PROJECT_ID}.iam.gserviceaccount.com'
+      - '--timeout=300'
+      - '--startup-cpu-boost'
+      - '--set-secrets=OPENAI_API_KEY=OPENAI_API_KEY:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,PINECONE_API_KEY=PINECONE_API_KEY:latest,FIREBASE_CRED_B64=FIREBASE_CRED_B64:latest,GCS_CRED_B64=GCS_CRED_B64:latest,WATI_API_URL=WATI_API_URL:latest,WATI_API_TOKEN=WATI_API_TOKEN:latest'
+
+images:
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/knowledge-hub/backend:$COMMIT_SHA'
+
+# Define the secrets that can be accessed by the build steps
+availableSecrets:
+  secretManager:
+    - versionName: projects/${PROJECT_ID}/secrets/PINECONE_API_KEY/versions/latest
+      env: 'PINECONE_API_KEY'
