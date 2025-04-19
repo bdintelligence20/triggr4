@@ -1,6 +1,6 @@
 // src/config.ts
 
-// Replace this URL with your actual backend URL from Render
-const API_URL = 'https://triggr4bg.onrender.com';
+// Updated to GCP Cloud Run backend URL
+const API_URL = 'https://knowledge-hub-backend-114820695484.us-central1.run.app';
 
 export { API_URL };

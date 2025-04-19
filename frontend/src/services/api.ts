@@ -1,5 +1,5 @@
-// API base URL - replace with your actual backend URL
-const API_BASE_URL = 'https://triggr4bg.onrender.com';
+// API base URL - updated to GCP Cloud Run
+const API_BASE_URL = 'https://knowledge-hub-backend-114820695484.us-central1.run.app';
 
 export interface ApiResponse<T> {
   data?: T;
